@@ -226,6 +226,18 @@ func (b *Bucket) delete(path string) error {
 	return nil
 }
 
+// ListObjects returns a list of objects under the given prefixes using parallel
+// requests for each prefix and any continuations.
+//
+// maxKeys indicates how many keys should be returned per request
+func (b *Bucket) ListObjects(prefixes []string, maxKeys int, c *Config) (*ObjectLister, error) {
+	if c == nil {
+		c = b.conf()
+	}
+
+	return newObjectLister(c, b, prefixes, maxKeys)
+}
+
 // DeleteMultiple deletes multiple keys in a single request.
 //
 // If 'quiet' is false, the result includes the requested paths and whether they
