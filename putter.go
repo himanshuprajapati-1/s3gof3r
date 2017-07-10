@@ -381,6 +381,10 @@ func (p *putter) retryRequest(method, urlStr string, body io.ReadSeeker, h http.
 
 		p.b.Sign(req)
 		resp, err = p.c.Client.Do(req)
+		if err == nil && resp.StatusCode == 500 {
+			time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
+			continue
+		}
 		if err == nil {
 			return
 		}
