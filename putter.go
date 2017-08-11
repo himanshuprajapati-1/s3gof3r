@@ -62,6 +62,7 @@ type putter struct {
 	md5OfParts hash.Hash
 	md5        hash.Hash
 	ETag       string
+	Code       string
 
 	sp *bp
 
@@ -255,27 +256,51 @@ func (p *putter) Close() (err error) {
 		p.abort()
 		return
 	}
-	b := bytes.NewReader(body)
-	v := url.Values{}
-	v.Set("uploadId", p.UploadID)
-	resp, err := p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
-	if err != nil {
-		p.abort()
-		return
-	}
-	defer checkClose(resp.Body, err)
-	if resp.StatusCode != 200 {
-		p.abort()
-		return newRespError(resp)
+
+	for retries := 0; retries < 5; retries++ {
+		b := bytes.NewReader(body)
+		v := url.Values{}
+		v.Set("uploadId", p.UploadID)
+
+		var resp *http.Response
+		resp, err = p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
+		if err != nil {
+			p.abort()
+			return
+		}
+		defer checkClose(resp.Body, err)
+		if resp.StatusCode != 200 {
+			p.abort()
+			return newRespError(resp)
+		}
+
+		// S3 will return an error under a 200 as well. Instead of the
+		// CompleteMultipartUploadResult that we expect below, we might be
+		// getting an Error, e.g. with InternalError under it. We should behave
+		// in that case as though we received a 500 and try again.
+
+		p.Code = ""
+		// Parse etag from body of response
+		err = xml.NewDecoder(resp.Body).Decode(p)
+		if err != nil {
+			return
+		}
+
+		// This is what S3 returns instead of a 500 when we should try
+		// to complete the multipart upload again
+		if p.Code == "InternalError" {
+			continue
+		}
+		// Some other generic error
+		if p.Code != "" {
+			return fmt.Errorf("CompleteMultipartUpload error: %s", p.Code)
+		}
+
+		break
 	}
 	// Check md5 hash of concatenated part md5 hashes against ETag
 	// more info: https://forums.aws.amazon.com/thread.jspa?messageID=456442&#456442
 	calculatedMd5ofParts := fmt.Sprintf("%x", p.md5OfParts.Sum(nil))
-	// Parse etag from body of response
-	err = xml.NewDecoder(resp.Body).Decode(p)
-	if err != nil {
-		return
-	}
 	// Trim quotes '"' and strip part count from end.
 	remoteMd5ofParts := strings.Trim(p.ETag, "\"")
 	remoteMd5ofParts = strings.Split(remoteMd5ofParts, "-")[0]
