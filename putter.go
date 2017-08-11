@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -362,6 +363,8 @@ func (p *putter) putMd5() (err error) {
 	return
 }
 
+var err500 = errors.New("received 500 from server")
+
 func (p *putter) retryRequest(method, urlStr string, body io.ReadSeeker, h http.Header) (resp *http.Response, err error) {
 	for i := 0; i < p.c.NTry; i++ {
 		var req *http.Request
@@ -382,8 +385,8 @@ func (p *putter) retryRequest(method, urlStr string, body io.ReadSeeker, h http.
 		p.b.Sign(req)
 		resp, err = p.c.Client.Do(req)
 		if err == nil && resp.StatusCode == 500 {
+			err = err500
 			time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
-			continue
 		}
 		if err == nil {
 			return
