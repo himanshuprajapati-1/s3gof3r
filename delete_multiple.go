@@ -40,6 +40,10 @@ type DeleteResult struct {
 }
 
 func deleteMultiple(c *Config, b *Bucket, quiet bool, keys []string) (DeleteResult, error) {
+	if len(keys) == 0 {
+		return DeleteResult{}, nil
+	}
+
 	u, err := b.url("", c)
 	if err != nil {
 		return DeleteResult{}, err
