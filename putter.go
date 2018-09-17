@@ -265,6 +265,12 @@ func (p *putter) Close() (err error) {
 		var resp *http.Response
 		resp, err = p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
 		if err != nil {
+			// If the connection got closed (firwall, proxy, etc.)
+			// we should also retry, just like if we'd had a 500.
+			if err == io.ErrUnexpectedEOF {
+				continue
+			}
+
 			p.abort()
 			return
 		}
@@ -283,6 +289,12 @@ func (p *putter) Close() (err error) {
 		// Parse etag from body of response
 		err = xml.NewDecoder(resp.Body).Decode(p)
 		if err != nil {
+			// The decoder unfortunately returns string error
+			// instead of specific errors.
+			if err.Error() == "unexpected EOF" {
+				continue
+			}
+
 			return
 		}
 
