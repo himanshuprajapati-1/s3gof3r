@@ -152,26 +152,30 @@ func (g *getter) initChunks() {
 
 func (g *getter) worker() {
 	for c := range g.getCh {
-		g.retryGetChunk(c)
+		if err := g.retryGetChunk(c); err != nil {
+			close(g.readCh)
+			break
+		}
 	}
 }
 
-func (g *getter) retryGetChunk(c *chunk) {
+func (g *getter) retryGetChunk(c *chunk) error {
 	var err error
 	c.b = <-g.sp.get
 	for i := 0; i < g.c.NTry; i++ {
 		err = g.getChunk(c)
 		if err == nil {
-			return
+			return nil
 		}
 		logger.debugPrintf("error on attempt %d: retrying chunk: %v, error: %s", i, c.id, err)
 		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
 	}
 	select {
 	case <-g.quit: // check for closed quit channel before setting error
-		return
+		return nil
 	default:
 		g.err = err
+		return err
 	}
 }
 
@@ -282,7 +286,10 @@ func (g *getter) nextChunk() (*chunk, error) {
 		}
 		// if next chunk not in qWait, read from channel
 		select {
-		case c := <-g.readCh:
+		case c, ok := <-g.readCh:
+			if !ok {
+				return nil, g.err
+			}
 			g.qWait[c.id] = c
 			g.cond.L.Lock()
 			g.qWaitLen++
