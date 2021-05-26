@@ -28,9 +28,13 @@ type getter struct {
 	bytesRead  int64
 	chunkTotal int
 
-	readCh   chan *chunk
-	getCh    chan *chunk
-	quit     chan struct{}
+	readCh chan *chunk
+	getCh  chan *chunk
+	quit   chan struct{}
+
+	workerAborted chan struct{}
+	abortOnce     sync.Once
+
 	qWait    map[int]*chunk
 	qWaitLen uint
 	cond     sync.Cond
@@ -64,6 +68,7 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	g.getCh = make(chan *chunk)
 	g.readCh = make(chan *chunk)
 	g.quit = make(chan struct{})
+	g.workerAborted = make(chan struct{})
 	g.qWait = make(map[int]*chunk)
 	g.b = b
 	g.md5 = md5.New()
@@ -152,30 +157,31 @@ func (g *getter) initChunks() {
 
 func (g *getter) worker() {
 	for c := range g.getCh {
-		if err := g.retryGetChunk(c); err != nil {
-			close(g.readCh)
+		g.retryGetChunk(c)
+		if g.err != nil {
+			// tell Read() caller that 1 or more chunks can't be read; abort
+			g.abortOnce.Do(func() { close(g.workerAborted) })
 			break
 		}
 	}
 }
 
-func (g *getter) retryGetChunk(c *chunk) error {
+func (g *getter) retryGetChunk(c *chunk) {
 	var err error
 	c.b = <-g.sp.get
 	for i := 0; i < g.c.NTry; i++ {
 		err = g.getChunk(c)
 		if err == nil {
-			return nil
+			return
 		}
 		logger.debugPrintf("error on attempt %d: retrying chunk: %v, error: %s", i, c.id, err)
 		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
 	}
 	select {
 	case <-g.quit: // check for closed quit channel before setting error
-		return nil
+		return
 	default:
 		g.err = err
-		return err
 	}
 }
 
@@ -286,14 +292,13 @@ func (g *getter) nextChunk() (*chunk, error) {
 		}
 		// if next chunk not in qWait, read from channel
 		select {
-		case c, ok := <-g.readCh:
-			if !ok {
-				return nil, g.err
-			}
+		case c := <-g.readCh:
 			g.qWait[c.id] = c
 			g.cond.L.Lock()
 			g.qWaitLen++
 			g.cond.L.Unlock()
+		case <-g.workerAborted:
+			return nil, g.err // worker aborted, quit
 		case <-g.quit:
 			return nil, g.err // fatal error, quit.
 		}
