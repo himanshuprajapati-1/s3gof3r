@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -23,18 +22,13 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 
 	l := ObjectLister{
 		ctx:      ctx,
+		cancel:   cancel,
 		b:        &bCopy,
 		c:        &cCopy,
 		prefixCh: make(chan string, len(prefixes)),
 		resultCh: make(chan []string, 1),
-		quit:     make(chan struct{}),
 		maxKeys:  maxKeys,
 	}
-
-	go func() {
-		<-l.quit
-		cancel()
-	}()
 
 	// Enqueue all of the prefixes that we were given. This won't
 	// block because we have initialized `prefixCh` to be long enough
@@ -65,7 +59,8 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 }
 
 type ObjectLister struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	b       *Bucket
 	c       *Config
@@ -75,12 +70,10 @@ type ObjectLister struct {
 	err      error
 	prefixCh chan string
 	resultCh chan []string
-	quit     chan struct{}
-	quitOnce sync.Once
 }
 
 func (l *ObjectLister) closeQuit() {
-	l.quitOnce.Do(func() { close(l.quit) })
+	l.cancel()
 }
 
 func (l *ObjectLister) worker(ctx context.Context) {
