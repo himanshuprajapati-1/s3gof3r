@@ -137,7 +137,6 @@ func (l *ObjectLister) Next() bool {
 	select {
 	case n, ok := <-l.resultCh:
 		if !ok {
-			l.err = nil
 			return false
 		}
 
