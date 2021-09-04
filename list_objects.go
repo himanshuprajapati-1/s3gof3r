@@ -52,7 +52,7 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	go func() {
 		eg.Wait()
 		close(l.resultCh)
-		l.closeQuit()
+		l.cancel()
 	}()
 
 	return &l, nil
@@ -72,10 +72,6 @@ type ObjectLister struct {
 	resultCh chan []string
 }
 
-func (l *ObjectLister) closeQuit() {
-	l.cancel()
-}
-
 func (l *ObjectLister) worker(ctx context.Context) {
 	for p := range l.prefixCh {
 		var continuation string
@@ -88,7 +84,7 @@ func (l *ObjectLister) worker(ctx context.Context) {
 					return
 				default:
 					l.err = err
-					l.closeQuit()
+					l.cancel()
 					return
 				}
 			}
@@ -161,7 +157,7 @@ func (l *ObjectLister) Error() error {
 }
 
 func (l *ObjectLister) Close() {
-	l.closeQuit()
+	l.cancel()
 }
 
 // ListObjectsOptions specifies the options for a ListObjects operation on a S3
