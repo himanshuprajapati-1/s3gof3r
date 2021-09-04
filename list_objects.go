@@ -80,7 +80,7 @@ func (l *ObjectLister) worker(ctx context.Context) {
 		var continuation string
 	retries:
 		for {
-			res, err := l.retryListObjects(p, continuation)
+			res, err := l.retryListObjects(ctx, p, continuation)
 			if err != nil {
 				select {
 				case <-ctx.Done():
@@ -113,9 +113,12 @@ func (l *ObjectLister) worker(ctx context.Context) {
 	}
 }
 
-func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResult, error) {
+func (l *ObjectLister) retryListObjects(
+	ctx context.Context, p, continuation string,
+) (*listBucketResult, error) {
 	var err error
 	var res *listBucketResult
+	var timer *time.Timer
 	for i := 0; i < l.c.NTry; i++ {
 		opts := listObjectsOptions{MaxKeys: l.maxKeys, Prefix: p, ContinuationToken: continuation}
 		res, err = listObjects(l.c, l.b, opts)
@@ -123,7 +126,22 @@ func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResu
 			return res, nil
 		}
 
-		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
+		// Exponential back-off, reusing the timer if possible:
+		duration := time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond
+		if timer == nil {
+			timer = time.NewTimer(duration)
+		} else {
+			timer.Reset(duration)
+		}
+
+		select {
+		case <-timer.C:
+			// Timer has fired and been drained, so it is ready for reuse.
+		case <-ctx.Done():
+			// Stop the timer to prevent a resource leak:
+			timer.Stop()
+			return nil, ctx.Err()
+		}
 	}
 
 	return nil, err
