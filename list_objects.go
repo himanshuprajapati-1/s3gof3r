@@ -17,29 +17,27 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	bCopy := *b
 
 	l := ObjectLister{
-		b:        &bCopy,
-		c:        &cCopy,
-		getCh:    make(chan string),
-		putCh:    make(chan []string, 1),
-		quit:     make(chan struct{}),
-		prefixes: prefixes,
-		maxKeys:  maxKeys,
+		b:       &bCopy,
+		c:       &cCopy,
+		getCh:   make(chan string),
+		putCh:   make(chan []string, 1),
+		quit:    make(chan struct{}),
+		maxKeys: maxKeys,
 	}
 
 	for i := 0; i < l.c.Concurrency; i++ {
 		l.wg.Add(1)
 		go l.worker()
 	}
-	go l.initPrefixes()
+	go l.initPrefixes(prefixes)
 
 	return &l, nil
 }
 
 type ObjectLister struct {
-	b        *Bucket
-	c        *Config
-	prefixes []string
-	maxKeys  int
+	b       *Bucket
+	c       *Config
+	maxKeys int
 
 	next     []string
 	err      error
@@ -54,9 +52,9 @@ func (l *ObjectLister) closeQuit() {
 	l.quitOnce.Do(func() { close(l.quit) })
 }
 
-func (l *ObjectLister) initPrefixes() {
+func (l *ObjectLister) initPrefixes(prefixes []string) {
 	// We first enqueue all of the prefixes we were given
-	for _, p := range l.prefixes {
+	for _, p := range prefixes {
 		l.getCh <- p
 	}
 	close(l.getCh)
