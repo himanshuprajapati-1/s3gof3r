@@ -19,7 +19,10 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 
 	bCopy := *b
 
+	ctx, cancel := context.WithCancel(context.TODO())
+
 	l := ObjectLister{
+		ctx:      ctx,
 		b:        &bCopy,
 		c:        &cCopy,
 		prefixCh: make(chan string, len(prefixes)),
@@ -28,7 +31,6 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 		maxKeys:  maxKeys,
 	}
 
-	ctx, cancel := context.WithCancel(context.TODO())
 	go func() {
 		<-l.quit
 		cancel()
@@ -48,7 +50,7 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 
 	for i := 0; i < min(l.c.Concurrency, len(prefixes)); i++ {
 		eg.Go(func() error {
-			l.worker(ctx)
+			l.worker(l.ctx)
 			return nil
 		})
 	}
@@ -63,6 +65,8 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 }
 
 type ObjectLister struct {
+	ctx context.Context
+
 	b       *Bucket
 	c       *Config
 	maxKeys int
@@ -150,7 +154,7 @@ func (l *ObjectLister) Next() bool {
 
 		l.next = n
 		return true
-	case <-l.quit:
+	case <-l.ctx.Done():
 		return false
 	}
 }
