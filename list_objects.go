@@ -1,6 +1,7 @@
 package s3gof3r
 
 import (
+	"context"
 	"encoding/xml"
 	"math"
 	"net/http"
@@ -27,6 +28,12 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 		maxKeys:  maxKeys,
 	}
 
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		<-l.quit
+		cancel()
+	}()
+
 	// Enqueue all of the prefixes that we were given. This won't
 	// block because we have initialized `prefixCh` to be long enough
 	// to hold all of them. This has the added benefit that there is
@@ -41,7 +48,7 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 
 	for i := 0; i < min(l.c.Concurrency, len(prefixes)); i++ {
 		eg.Go(func() error {
-			l.worker()
+			l.worker(ctx)
 			return nil
 		})
 	}
@@ -72,7 +79,7 @@ func (l *ObjectLister) closeQuit() {
 	l.quitOnce.Do(func() { close(l.quit) })
 }
 
-func (l *ObjectLister) worker() {
+func (l *ObjectLister) worker(ctx context.Context) {
 	for p := range l.prefixCh {
 		var continuation string
 	retries:
@@ -80,7 +87,7 @@ func (l *ObjectLister) worker() {
 			res, err := l.retryListObjects(p, continuation)
 			if err != nil {
 				select {
-				case <-l.quit:
+				case <-ctx.Done():
 					return
 				default:
 					l.err = err
@@ -95,7 +102,7 @@ func (l *ObjectLister) worker() {
 			}
 
 			select {
-			case <-l.quit:
+			case <-ctx.Done():
 				return
 			case l.resultCh <- keys:
 				continuation = res.NextContinuationToken
