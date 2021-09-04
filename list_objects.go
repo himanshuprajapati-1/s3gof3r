@@ -10,15 +10,21 @@ import (
 )
 
 func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*ObjectLister, error) {
-	l := new(ObjectLister)
-	l.c, l.b = new(Config), new(Bucket)
-	*l.c, *l.b = *c, *b
-	l.c.NTry = max(c.NTry, 1)
-	l.c.Concurrency = max(c.Concurrency, 1)
-	l.getCh, l.putCh = make(chan string), make(chan []string, 1)
-	l.quit = make(chan struct{})
-	l.prefixes = prefixes
-	l.maxKeys = maxKeys
+	cCopy := *c
+	cCopy.NTry = max(c.NTry, 1)
+	cCopy.Concurrency = max(c.Concurrency, 1)
+
+	bCopy := *b
+
+	l := ObjectLister{
+		b:        &bCopy,
+		c:        &cCopy,
+		getCh:    make(chan string),
+		putCh:    make(chan []string, 1),
+		quit:     make(chan struct{}),
+		prefixes: prefixes,
+		maxKeys:  maxKeys,
+	}
 
 	for i := 0; i < l.c.Concurrency; i++ {
 		l.wg.Add(1)
@@ -26,7 +32,7 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	}
 	go l.initPrefixes()
 
-	return l, nil
+	return &l, nil
 }
 
 type ObjectLister struct {
