@@ -49,6 +49,7 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	go func() {
 		eg.Wait()
 		close(l.resultCh)
+		l.closeQuit()
 	}()
 
 	return &l, nil
