@@ -21,7 +21,6 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	ctx, cancel := context.WithCancel(context.TODO())
 
 	l := ObjectLister{
-		ctx:      ctx,
 		cancel:   cancel,
 		b:        &bCopy,
 		c:        &cCopy,
@@ -40,17 +39,16 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	}
 	close(l.prefixCh)
 
-	var eg errgroup.Group
+	eg, ctx := errgroup.WithContext(ctx)
 
 	for i := 0; i < min(l.c.Concurrency, len(prefixes)); i++ {
 		eg.Go(func() error {
-			l.worker(l.ctx)
-			return nil
+			return l.worker(ctx)
 		})
 	}
 
 	go func() {
-		eg.Wait()
+		l.finalErr = eg.Wait()
 		close(l.resultCh)
 		l.cancel()
 	}()
@@ -59,7 +57,6 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 }
 
 type ObjectLister struct {
-	ctx    context.Context
 	cancel context.CancelFunc
 
 	b       *Bucket
@@ -69,13 +66,18 @@ type ObjectLister struct {
 	prefixCh chan string
 	resultCh chan []string
 
+	// finalErr is set before closing `resultCh` if any of the workers
+	// returned errors. Any subsequent calls to `Next()` report this
+	// error.
+	finalErr error
+
 	// currentValue and currentErr are the "results" of the most
 	// recent call to `Next()`.
 	currentValue []string
 	currentErr   error
 }
 
-func (l *ObjectLister) worker(ctx context.Context) {
+func (l *ObjectLister) worker(ctx context.Context) error {
 	for p := range l.prefixCh {
 		var continuation string
 	retries:
@@ -84,11 +86,9 @@ func (l *ObjectLister) worker(ctx context.Context) {
 			if err != nil {
 				select {
 				case <-ctx.Done():
-					return
+					return ctx.Err()
 				default:
-					l.currentErr = err
-					l.cancel()
-					return
+					return err
 				}
 			}
 
@@ -99,7 +99,7 @@ func (l *ObjectLister) worker(ctx context.Context) {
 
 			select {
 			case <-ctx.Done():
-				return
+				return ctx.Err()
 			case l.resultCh <- keys:
 				continuation = res.NextContinuationToken
 				if continuation != "" {
@@ -111,6 +111,8 @@ func (l *ObjectLister) worker(ctx context.Context) {
 			}
 		}
 	}
+
+	return nil
 }
 
 func (l *ObjectLister) retryListObjects(
@@ -151,21 +153,15 @@ func (l *ObjectLister) retryListObjects(
 // are more results, or false if there are no more results or there was an
 // error.
 func (l *ObjectLister) Next() bool {
-	if l.currentErr != nil {
+	var ok bool
+	l.currentValue, ok = <-l.resultCh
+	if !ok {
+		// If there has been an error, we now show it to the caller:
+		l.currentErr = l.finalErr
 		return false
 	}
 
-	select {
-	case n, ok := <-l.resultCh:
-		if !ok {
-			return false
-		}
-
-		l.currentValue = n
-		return true
-	case <-l.ctx.Done():
-		return false
-	}
+	return true
 }
 
 func (l *ObjectLister) Value() []string {
