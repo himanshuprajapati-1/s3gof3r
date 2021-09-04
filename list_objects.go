@@ -66,10 +66,13 @@ type ObjectLister struct {
 	c       *Config
 	maxKeys int
 
-	next     []string
-	err      error
 	prefixCh chan string
 	resultCh chan []string
+
+	// currentValue and currentErr are the "results" of the most
+	// recent call to `Next()`.
+	currentValue []string
+	currentErr   error
 }
 
 func (l *ObjectLister) worker(ctx context.Context) {
@@ -83,7 +86,7 @@ func (l *ObjectLister) worker(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				default:
-					l.err = err
+					l.currentErr = err
 					l.cancel()
 					return
 				}
@@ -130,7 +133,7 @@ func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResu
 // are more results, or false if there are no more results or there was an
 // error.
 func (l *ObjectLister) Next() bool {
-	if l.err != nil {
+	if l.currentErr != nil {
 		return false
 	}
 
@@ -140,7 +143,7 @@ func (l *ObjectLister) Next() bool {
 			return false
 		}
 
-		l.next = n
+		l.currentValue = n
 		return true
 	case <-l.ctx.Done():
 		return false
@@ -148,11 +151,11 @@ func (l *ObjectLister) Next() bool {
 }
 
 func (l *ObjectLister) Value() []string {
-	return l.next
+	return l.currentValue
 }
 
 func (l *ObjectLister) Error() error {
-	return l.err
+	return l.currentErr
 }
 
 func (l *ObjectLister) Close() {
