@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*ObjectLister, error) {
@@ -35,18 +37,17 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	}
 	close(l.prefixCh)
 
-	var wg sync.WaitGroup
+	var eg errgroup.Group
 
 	for i := 0; i < min(l.c.Concurrency, len(prefixes)); i++ {
-		wg.Add(1)
-		go func() {
+		eg.Go(func() error {
 			l.worker()
-			wg.Done()
-		}()
+			return nil
+		})
 	}
 
 	go func() {
-		wg.Wait()
+		eg.Wait()
 		close(l.resultCh)
 	}()
 
