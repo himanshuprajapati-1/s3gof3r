@@ -1,12 +1,9 @@
 package s3gof3r
 
 import (
-	"bytes"
-
 	"encoding/xml"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 )
 
@@ -65,8 +62,7 @@ type RespError struct {
 func newRespError(r *http.Response) *RespError {
 	e := new(RespError)
 	e.StatusCode = r.StatusCode
-	b, _ := ioutil.ReadAll(r.Body)
-	xml.NewDecoder(bytes.NewReader(b)).Decode(e) // parse error from response
+	xml.NewDecoder(r.Body).Decode(e) // parse error from response
 	r.Body.Close()
 	return e
 }
