@@ -82,7 +82,8 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	if resp.StatusCode != 200 {
 		return nil, nil, newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
+	// Otherwise, we don't need the body:
+	_ = resp.Body.Close()
 
 	// Golang changes content-length to -1 when chunked transfer encoding / EOF close response detected
 	if resp.ContentLength == -1 {
