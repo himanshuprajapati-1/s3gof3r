@@ -40,13 +40,13 @@ func InstanceKeys() (keys Keys, err error) {
 	if err != nil {
 		return
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		err = newRespError(resp)
 		return
 	}
-	role, err := ioutil.ReadAll(resp.Body)
+	defer checkClose(resp.Body, err)
 
+	role, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
@@ -56,11 +56,12 @@ func InstanceKeys() (keys Keys, err error) {
 	if err != nil {
 		return
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		err = newRespError(resp)
 		return
 	}
+	defer checkClose(resp.Body, err)
+
 	metadata, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return

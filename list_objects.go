@@ -217,10 +217,10 @@ func listObjects(c *Config, b *Bucket, opts listObjectsOptions) (result *listBuc
 	if err != nil {
 		return nil, err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return nil, newRespError(resp)
 	}
+	defer checkClose(resp.Body, err)
 
 	decoder := xml.NewDecoder(resp.Body)
 	if err := decoder.Decode(result); err != nil {

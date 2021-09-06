@@ -79,10 +79,10 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	if err != nil {
 		return nil, nil, err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return nil, nil, newRespError(resp)
 	}
+	defer checkClose(resp.Body, err)
 
 	// Golang changes content-length to -1 when chunked transfer encoding / EOF close response detected
 	if resp.ContentLength == -1 {
@@ -197,10 +197,11 @@ func (g *getter) getChunk(c *chunk) error {
 	if err != nil {
 		return err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 206 && resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
+	defer checkClose(resp.Body, err)
+
 	n, err := io.ReadAtLeast(resp.Body, c.b, int(c.size))
 	if err != nil {
 		return err
@@ -341,10 +342,11 @@ func (g *getter) checkMd5() (err error) {
 	if err != nil {
 		return
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("MD5 check failed: %s not found: %s", md5Url.String(), newRespError(resp))
 	}
+	defer checkClose(resp.Body, err)
+
 	givenMd5, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return
