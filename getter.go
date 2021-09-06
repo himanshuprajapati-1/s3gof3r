@@ -201,10 +201,10 @@ func (g *getter) getChunk(c *chunk) error {
 	if resp.StatusCode != 206 && resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
 
 	n, err := io.ReadAtLeast(resp.Body, c.b, int(c.size))
 	if err != nil {
+		_ = resp.Body.Close()
 		return err
 	}
 	if err := resp.Body.Close(); err != nil {
