@@ -60,6 +60,8 @@ type RespError struct {
 	StatusCode int
 }
 
+// newRespError returns an error whose contents are based on the
+// contents of `r.Body`. It closes `r.Body`.
 func newRespError(r *http.Response) *RespError {
 	e := new(RespError)
 	e.StatusCode = r.StatusCode
