@@ -353,7 +353,7 @@ func (p *putter) abort() {
 	if resp.StatusCode != 204 {
 		logger.Printf("Error aborting multipart upload: %v", newRespError(resp))
 	}
-	defer checkClose(resp.Body, err)
+	_ = resp.Body.Close()
 
 	return
 }
