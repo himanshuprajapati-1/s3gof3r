@@ -3,7 +3,6 @@ package s3gof3r
 import (
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -73,14 +72,4 @@ func (e *RespError) Error() string {
 		e.StatusCode,
 		e.Message,
 	)
-}
-
-func checkClose(c io.Closer, err error) {
-	if c != nil {
-		cerr := c.Close()
-		if err == nil {
-			err = cerr
-		}
-	}
-
 }
