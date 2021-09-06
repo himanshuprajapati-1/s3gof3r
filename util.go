@@ -62,8 +62,8 @@ type RespError struct {
 func newRespError(r *http.Response) *RespError {
 	e := new(RespError)
 	e.StatusCode = r.StatusCode
-	xml.NewDecoder(r.Body).Decode(e) // parse error from response
-	r.Body.Close()
+	_ = xml.NewDecoder(r.Body).Decode(e) // parse error from response
+	_ = r.Body.Close()
 	return e
 }
 
