@@ -379,7 +379,7 @@ func (p *putter) hashContent(r io.ReadSeeker) (string, string, string, error) {
 // Put md5 file in .md5 subdirectory of bucket  where the file is stored
 // e.g. the md5 for https://mybucket.s3.amazonaws.com/gof3r will be stored in
 // https://mybucket.s3.amazonaws.com/.md5/gof3r.md5
-func (p *putter) putMd5() (err error) {
+func (p *putter) putMd5() error {
 	calcMd5 := fmt.Sprintf("%x", p.md5.Sum(nil))
 	md5Reader := strings.NewReader(calcMd5)
 	md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
@@ -391,19 +391,21 @@ func (p *putter) putMd5() (err error) {
 	logger.debugPrintln("md5Path: ", md5Path)
 	r, err := http.NewRequest("PUT", md5Url.String(), md5Reader)
 	if err != nil {
-		return
+		return err
 	}
 	p.b.Sign(r)
 	resp, err := p.c.Client.Do(r)
 	if err != nil {
-		return
+		return err
 	}
 	if resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
+	if err := resp.Body.Close(); err != nil {
+		return err
+	}
 
-	return
+	return nil
 }
 
 var err500 = errors.New("received 500 from server")
