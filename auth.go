@@ -29,8 +29,7 @@ type mdCreds struct {
 
 // InstanceKeys Requests the AWS keys from the instance-based metadata on EC2
 // Assumes only one IAM role.
-func InstanceKeys() (keys Keys, err error) {
-
+func InstanceKeys() (Keys, error) {
 	rolePath := "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
 	var creds mdCreds
 
@@ -38,45 +37,48 @@ func InstanceKeys() (keys Keys, err error) {
 	// assumes there is only one
 	resp, err := ClientWithTimeout(2 * time.Second).Get(rolePath)
 	if err != nil {
-		return
+		return Keys{}, err
 	}
 	if resp.StatusCode != 200 {
-		err = newRespError(resp)
-		return
+		return Keys{}, newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
 
 	role, err := ioutil.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
 	if err != nil {
-		return
+		return Keys{}, err
+	}
+	if closeErr != nil {
+		return Keys{}, closeErr
 	}
 
 	// request the credential metadata for the role
 	resp, err = http.Get(rolePath + string(role))
 	if err != nil {
-		return
+		return Keys{}, err
 	}
 	if resp.StatusCode != 200 {
-		err = newRespError(resp)
-		return
+		return Keys{}, newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
 
 	metadata, err := ioutil.ReadAll(resp.Body)
+	closeErr = resp.Body.Close()
 	if err != nil {
-		return
+		return Keys{}, err
+	}
+	if closeErr != nil {
+		return Keys{}, closeErr
 	}
 
 	if err = json.Unmarshal([]byte(metadata), &creds); err != nil {
-		return
+		return Keys{}, err
 	}
-	keys = Keys{
+
+	return Keys{
 		AccessKey:     creds.AccessKeyID,
 		SecretKey:     creds.SecretAccessKey,
 		SecurityToken: creds.Token,
-	}
-
-	return
+	}, nil
 }
 
 // EnvKeys Reads the AWS keys from the environment
