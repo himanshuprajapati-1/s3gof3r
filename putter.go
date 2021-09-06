@@ -216,7 +216,9 @@ func (p *putter) putPart(part *part) error {
 	if resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
+	if err := resp.Body.Close(); err != nil {
+		return err
+	}
 
 	s := resp.Header.Get("etag")
 	if len(s) < 2 {
