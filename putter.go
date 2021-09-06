@@ -79,8 +79,8 @@ type putter struct {
 // See http://docs.amazonwebservices.com/AmazonS3/latest/dev/mpuoverview.html.
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
-func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (p *putter, err error) {
-	p = new(putter)
+func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
+	p := new(putter)
 	p.url = url
 	p.c, p.b = new(Config), new(Bucket)
 	*p.c, *p.b = *c, *b
@@ -94,12 +94,16 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (p *putter, err
 	if resp.StatusCode != 200 {
 		return nil, newRespError(resp)
 	}
-	defer checkClose(resp.Body, err)
 
 	err = xml.NewDecoder(resp.Body).Decode(p)
+	closeErr := resp.Body.Close()
 	if err != nil {
 		return nil, err
 	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+
 	p.ch = make(chan *part)
 	for i := 0; i < p.c.Concurrency; i++ {
 		go p.worker()
