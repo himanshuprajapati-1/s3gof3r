@@ -2,7 +2,7 @@ package main
 
 import (
 	"errors"
-
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -14,7 +14,6 @@ type flagTest struct {
 }
 
 var flagTests = []flagTest{
-
 	{[]string{"gof3r", "nocmd"},
 		errors.New("Unknown command")},
 	{[]string{"gof3r", "put", "-b", "fake-bucket", "-k", "test-key"},
@@ -39,9 +38,14 @@ var flagTests = []flagTest{
 
 func TestFlags(t *testing.T) {
 	for _, tt := range flagTests {
-		os.Args = tt.flags
-		_, err := parser.Parse()
-		errComp(tt.err, err, t, tt)
+		t.Run(
+			fmt.Sprintf("TestFlags(%s)", strings.Join(tt.flags[1:], ", ")),
+			func(t *testing.T) {
+				os.Args = tt.flags
+				_, err := parser.Parse()
+				errComp(tt.err, err, t, tt)
+			},
+		)
 	}
 }
 
