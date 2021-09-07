@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 	var err error
 	b, err = testBucket()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("creating test bucket: %v", err)
 	}
 	uploadTestFiles()
 }
@@ -42,7 +42,7 @@ func uploadTestFiles() {
 			go func(path string, rSize int64) {
 				err := b.putReader(path, &randSrc{Size: int(rSize)})
 				if err != nil {
-					log.Fatal(err)
+					log.Fatalf("creating test file '%s': %v", path, err)
 				}
 				wg.Done()
 			}(tt.path, tt.rSize)
