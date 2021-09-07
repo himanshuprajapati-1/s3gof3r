@@ -50,6 +50,7 @@ func TestFlags(t *testing.T) {
 }
 
 func errComp(expect, actual error, t *testing.T, tt interface{}) bool {
+	t.Helper()
 
 	if expect == nil && actual == nil {
 		return true
