@@ -15,12 +15,12 @@ const (
 )
 
 var tb = os.Getenv("TEST_BUCKET")
-var defaultcpOpts = &cpOpts{
+var defaultCpOpts = &CpOpts{
 	CommonOpts: CommonOpts{EndPoint: "s3.amazonaws.com"},
 	DataOpts:   DataOpts{PartSize: mb}}
 
 type cpTest struct {
-	*cpOpts
+	*CpOpts
 	args []string
 	err  error
 }
@@ -41,12 +41,12 @@ var cpTests = []cpTest{
 	{defaultCpOpts,
 		[]string{"s3://" + tb + "/noexist", "/dev/null"},
 		errors.New("404")},
-	{&cpOpts{
+	{&CpOpts{
 		CommonOpts: CommonOpts{EndPoint: "s3-external-1.amazonaws.com"},
 		DataOpts:   DataOpts{PartSize: mb}},
 		[]string{"s3://" + tb + "/&exist", "/dev/null"},
 		errors.New("404")},
-	{&cpOpts{
+	{&CpOpts{
 		DataOpts: DataOpts{NoSSL: true,
 			PartSize: mb}},
 		[]string{"s3://" + tb + "/t1", "s3://" + tb + "/tdir/.tst"},

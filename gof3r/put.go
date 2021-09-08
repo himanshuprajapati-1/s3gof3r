@@ -7,9 +7,10 @@ import (
 	"os"
 
 	"github.com/github/s3gof3r"
+	"github.com/jessevdk/go-flags"
 )
 
-type putOpts struct {
+type PutOpts struct {
 	Key    string `long:"key" short:"k" description:"S3 object key" required:"true" no-ini:"true"`
 	Bucket string `long:"bucket" short:"b" description:"S3 bucket" required:"true" no-ini:"true"`
 	Path   string `short:"p" long:"path" description:"Path to file. Defaults to standard output for streaming." no-ini:"true"`
@@ -18,9 +19,7 @@ type putOpts struct {
 	UpOpts
 }
 
-var put putOpts
-
-func (put *putOpts) Execute(args []string) (err error) {
+func (put *PutOpts) Execute(args []string) (err error) {
 	conf := new(s3gof3r.Config)
 	*conf = *s3gof3r.DefaultConfig
 	k, err := getAWSKeys()
@@ -62,8 +61,8 @@ func (put *putOpts) Execute(args []string) (err error) {
 	return
 }
 
-func init() {
-	_, err := parser.AddCommand("put", "upload to S3", "put (upload) data to S3 object", &put)
+func addPutOpts(opts *PutOpts, parser *flags.Parser) {
+	_, err := parser.AddCommand("put", "upload to S3", "put (upload) data to S3 object", opts)
 	if err != nil {
 		log.Fatal(err)
 	}

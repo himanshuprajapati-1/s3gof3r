@@ -7,20 +7,19 @@ import (
 	"os"
 
 	"github.com/github/s3gof3r"
+	"github.com/jessevdk/go-flags"
 )
 
-type rmOpts struct {
+type RmOpts struct {
 	CommonOpts
 	VersionID string `short:"v" long:"versionId" description:"version ID of the object version to delete" no-ini:"true"`
 }
 
-var rm rmOpts
-
-func (rm *rmOpts) Usage() string {
+func (rm *RmOpts) Usage() string {
 	return "<path> [rm-OPTIONS]"
 }
 
-func (rm *rmOpts) Execute(args []string) error {
+func (rm *RmOpts) Execute(args []string) error {
 
 	k, err := getAWSKeys()
 	if err != nil {
@@ -48,8 +47,8 @@ func (rm *rmOpts) Execute(args []string) error {
 	return s3.Bucket(u.Host).Delete(u.Path)
 }
 
-func init() {
-	cmd, err := parser.AddCommand("rm", "delete from S3", "", &rm)
+func addRmOpts(opts *RmOpts, parser *flags.Parser) {
+	cmd, err := parser.AddCommand("rm", "delete from S3", "", opts)
 	if err != nil {
 		log.Fatal(err)
 	}

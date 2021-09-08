@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
@@ -41,8 +40,8 @@ func TestFlags(t *testing.T) {
 		t.Run(
 			fmt.Sprintf("TestFlags(%s)", strings.Join(tt.flags[1:], ", ")),
 			func(t *testing.T) {
-				os.Args = tt.flags
-				_, err := parser.Parse()
+				_, parser := getOptionParser()
+				_, err := parser.ParseArgs(tt.flags[1:])
 				errComp(tt.err, err, t, tt)
 			},
 		)
