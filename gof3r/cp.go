@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/github/s3gof3r"
+	"github.com/jessevdk/go-flags"
 )
 
 type CpArg struct {
@@ -16,16 +17,14 @@ type CpArg struct {
 	Dest   string `name:"dest"`
 }
 
-type cpOpts struct {
+type CpOpts struct {
 	DataOpts
 	CommonOpts
 	CpArg `positional-args:"true" required:"true"`
 	UpOpts
 }
 
-var cp cpOpts
-
-func (cp *cpOpts) Execute(args []string) (err error) {
+func (cp *CpOpts) Execute(args []string) (err error) {
 
 	k, err := getAWSKeys()
 	if err != nil {
@@ -81,8 +80,8 @@ func (cp *cpOpts) Execute(args []string) (err error) {
 	return
 }
 
-func init() {
-	cmd, err := parser.AddCommand("cp", "copy S3 objects", "copy S3 objects to or from S3 and local files", &cp)
+func addCpOpts(opts *CpOpts, parser *flags.Parser) {
+	cmd, err := parser.AddCommand("cp", "copy S3 objects", "copy S3 objects to or from S3 and local files", opts)
 	if err != nil {
 		log.Fatal(err)
 	}

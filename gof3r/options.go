@@ -36,24 +36,33 @@ type UpOpts struct {
 	ACL    string      `long:"acl" description:"canned acl to apply to the object"`
 }
 
-var appOpts struct {
+type AppOpts struct {
 	Version  func() `long:"version" short:"v" description:"Print version"`
 	Man      func() `long:"manpage" short:"m" description:"Create gof3r.man man page in current directory"`
 	WriteIni bool   `long:"writeini" short:"i" description:"Write .gof3r.ini in current user's home directory" no-ini:"true"`
 }
-var parser = flags.NewParser(&appOpts, (flags.HelpFlag | flags.PassDoubleDash))
 
-func init() {
+type gof3rOpts struct {
+	AppOpts
+	CpOpts
+	GetOpts
+	PutOpts
+	RmOpts
+}
+
+func getOptionParser() (*gof3rOpts, *flags.Parser) {
+	var opts gof3rOpts
+	parser := flags.NewParser(&opts.AppOpts, (flags.HelpFlag | flags.PassDoubleDash))
 
 	// set parser fields
 	parser.ShortDescription = "streaming, concurrent s3 client"
 
-	appOpts.Version = func() {
+	opts.AppOpts.Version = func() {
 		fmt.Fprintf(os.Stderr, "%s version %s\n", name, version)
 		os.Exit(0)
 	}
 
-	appOpts.Man = func() {
+	opts.AppOpts.Man = func() {
 		f, err := os.Create(name + ".man")
 		if err != nil {
 			log.Fatal(err)
@@ -62,6 +71,13 @@ func init() {
 		fmt.Fprintf(os.Stderr, "man page written to %s\n", f.Name())
 		os.Exit(0)
 	}
+
+	addCpOpts(&opts.CpOpts, parser)
+	addGetOpts(&opts.GetOpts, parser)
+	addPutOpts(&opts.PutOpts, parser)
+	addRmOpts(&opts.RmOpts, parser)
+
+	return &opts, parser
 }
 
 func iniPath() (path string, exist bool, err error) {
@@ -76,7 +92,7 @@ func iniPath() (path string, exist bool, err error) {
 	return
 }
 
-func parseIni() (err error) {
+func parseIni(parser *flags.Parser) (err error) {
 	p, exist, err := iniPath()
 	if err != nil || !exist {
 		return
@@ -84,7 +100,7 @@ func parseIni() (err error) {
 	return flags.NewIniParser(parser).ParseFile(p)
 }
 
-func writeIni() {
+func writeIni(parser *flags.Parser) {
 	p, exist, err := iniPath()
 	if err != nil {
 		log.Fatal(err)
