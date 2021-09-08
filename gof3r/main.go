@@ -52,16 +52,17 @@ func main() {
 
 	start := time.Now()
 
+	opts, parser := getOptionParser()
+
 	// parse ini file
-	if err := parseIni(); err != nil {
+	if err := parseIni(parser); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
 
 	// parser calls the Execute function for the command after parsing the command line options.
 	if _, err := parser.Parse(); err != nil {
-
-		if appOpts.WriteIni {
-			writeIni() // exits
+		if opts.AppOpts.WriteIni {
+			writeIni(parser) // exits
 		}
 
 		// handling for flag parse errors

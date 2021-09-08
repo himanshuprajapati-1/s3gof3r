@@ -7,9 +7,10 @@ import (
 	"os"
 
 	"github.com/github/s3gof3r"
+	"github.com/jessevdk/go-flags"
 )
 
-type getOpts struct {
+type GetOpts struct {
 	Key    string `long:"key" short:"k" description:"S3 object key" required:"true" no-ini:"true"`
 	Bucket string `long:"bucket" short:"b" description:"S3 bucket" required:"true" no-ini:"true"`
 	Path   string `short:"p" long:"path" description:"Path to file. Defaults to standard output for streaming." no-ini:"true"`
@@ -18,9 +19,7 @@ type getOpts struct {
 	VersionID string `short:"v" long:"versionId" description:"Version ID of the object. Incompatible with md5 check (use --no-md5)." no-ini:"true"`
 }
 
-var get getOpts
-
-func (get *getOpts) Execute(args []string) (err error) {
+func (get *GetOpts) Execute(args []string) (err error) {
 	conf := new(s3gof3r.Config)
 	*conf = *s3gof3r.DefaultConfig
 	k, err := getAWSKeys()
@@ -66,8 +65,8 @@ func (get *getOpts) Execute(args []string) (err error) {
 	return
 }
 
-func init() {
-	_, err := parser.AddCommand("get", "download from S3", "get (download) object from S3", &get)
+func addGetOpts(opts *GetOpts, parser *flags.Parser) {
+	_, err := parser.AddCommand("get", "download from S3", "get (download) object from S3", opts)
 	if err != nil {
 		log.Fatal(err)
 	}
