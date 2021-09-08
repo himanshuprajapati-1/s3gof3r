@@ -37,7 +37,7 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < l.c.Concurrency; i++ {
+	for i := 0; i < min(l.c.Concurrency, len(prefixes)); i++ {
 		wg.Add(1)
 		go func() {
 			l.worker()
