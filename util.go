@@ -1,12 +1,8 @@
 package s3gof3r
 
 import (
-	"bytes"
-
 	"encoding/xml"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net/http"
 )
 
@@ -60,12 +56,13 @@ type RespError struct {
 	StatusCode int
 }
 
+// newRespError returns an error whose contents are based on the
+// contents of `r.Body`. It closes `r.Body`.
 func newRespError(r *http.Response) *RespError {
 	e := new(RespError)
 	e.StatusCode = r.StatusCode
-	b, _ := ioutil.ReadAll(r.Body)
-	xml.NewDecoder(bytes.NewReader(b)).Decode(e) // parse error from response
-	r.Body.Close()
+	_ = xml.NewDecoder(r.Body).Decode(e) // parse error from response
+	_ = r.Body.Close()
 	return e
 }
 
@@ -75,14 +72,4 @@ func (e *RespError) Error() string {
 		e.StatusCode,
 		e.Message,
 	)
-}
-
-func checkClose(c io.Closer, err error) {
-	if c != nil {
-		cerr := c.Close()
-		if err == nil {
-			err = cerr
-		}
-	}
-
 }

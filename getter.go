@@ -79,10 +79,11 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	if err != nil {
 		return nil, nil, err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return nil, nil, newRespError(resp)
 	}
+	// Otherwise, we don't need the body:
+	_ = resp.Body.Close()
 
 	// Golang changes content-length to -1 when chunked transfer encoding / EOF close response detected
 	if resp.ContentLength == -1 {
@@ -197,12 +198,13 @@ func (g *getter) getChunk(c *chunk) error {
 	if err != nil {
 		return err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 206 && resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
+
 	n, err := io.ReadAtLeast(resp.Body, c.b, int(c.size))
 	if err != nil {
+		_ = resp.Body.Close()
 		return err
 	}
 	if err := resp.Body.Close(); err != nil {
@@ -327,7 +329,7 @@ func (g *getter) Close() error {
 	return nil
 }
 
-func (g *getter) checkMd5() (err error) {
+func (g *getter) checkMd5() error {
 	calcMd5 := fmt.Sprintf("%x", g.md5.Sum(nil))
 	md5Path := fmt.Sprint(".md5", g.url.Path, ".md5")
 	md5Url, err := g.b.url(md5Path, g.c)
@@ -339,18 +341,22 @@ func (g *getter) checkMd5() (err error) {
 	logger.debugPrintln("md5Path: ", md5Path)
 	resp, err := g.retryRequest("GET", md5Url.String(), nil)
 	if err != nil {
-		return
+		return err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("MD5 check failed: %s not found: %s", md5Url.String(), newRespError(resp))
 	}
+
 	givenMd5, err := ioutil.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
 	if err != nil {
-		return
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if calcMd5 != string(givenMd5) {
 		return fmt.Errorf("MD5 mismatch. given:%s calculated:%s", givenMd5, calcMd5)
 	}
-	return
+	return nil
 }

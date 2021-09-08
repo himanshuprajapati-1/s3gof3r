@@ -187,8 +187,8 @@ type ListObjectsResult struct {
 	result *listBucketResult
 }
 
-func listObjects(c *Config, b *Bucket, opts listObjectsOptions) (result *listBucketResult, err error) {
-	result = new(listBucketResult)
+func listObjects(c *Config, b *Bucket, opts listObjectsOptions) (*listBucketResult, error) {
+	result := new(listBucketResult)
 	u, err := b.url("", c)
 	if err != nil {
 		return nil, err
@@ -217,14 +217,17 @@ func listObjects(c *Config, b *Bucket, opts listObjectsOptions) (result *listBuc
 	if err != nil {
 		return nil, err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return nil, newRespError(resp)
 	}
 
-	decoder := xml.NewDecoder(resp.Body)
-	if err := decoder.Decode(result); err != nil {
+	err = xml.NewDecoder(resp.Body).Decode(result)
+	closeErr := resp.Body.Close()
+	if err != nil {
 		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
 	}
 
 	return result, nil
