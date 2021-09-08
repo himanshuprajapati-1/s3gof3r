@@ -35,13 +35,18 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	}
 	close(l.prefixCh)
 
+	var wg sync.WaitGroup
+
 	for i := 0; i < l.c.Concurrency; i++ {
-		l.wg.Add(1)
-		go l.worker()
+		wg.Add(1)
+		go func() {
+			l.worker()
+			wg.Done()
+		}()
 	}
 
 	go func() {
-		l.wg.Wait()
+		wg.Wait()
 		close(l.resultCh)
 	}()
 
@@ -57,7 +62,6 @@ type ObjectLister struct {
 	err      error
 	prefixCh chan string
 	resultCh chan []string
-	wg       sync.WaitGroup
 	quit     chan struct{}
 	quitOnce sync.Once
 }
@@ -102,8 +106,6 @@ func (l *ObjectLister) worker() {
 			}
 		}
 	}
-
-	l.wg.Done()
 }
 
 func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResult, error) {
