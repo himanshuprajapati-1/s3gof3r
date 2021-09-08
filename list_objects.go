@@ -19,17 +19,31 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	l := ObjectLister{
 		b:        &bCopy,
 		c:        &cCopy,
-		prefixCh: make(chan string),
+		prefixCh: make(chan string, len(prefixes)),
 		resultCh: make(chan []string, 1),
 		quit:     make(chan struct{}),
 		maxKeys:  maxKeys,
 	}
 
+	// Enqueue all of the prefixes that we were given. This won't
+	// block because we have initialized `prefixCh` to be long enough
+	// to hold all of them. This has the added benefit that there is
+	// no data race if the caller happens to modify the contents of
+	// the slice after this call returns.
+	for _, p := range prefixes {
+		l.prefixCh <- p
+	}
+	close(l.prefixCh)
+
 	for i := 0; i < l.c.Concurrency; i++ {
 		l.wg.Add(1)
 		go l.worker()
 	}
-	go l.initPrefixes(prefixes)
+
+	go func() {
+		l.wg.Wait()
+		close(l.resultCh)
+	}()
 
 	return &l, nil
 }
@@ -50,17 +64,6 @@ type ObjectLister struct {
 
 func (l *ObjectLister) closeQuit() {
 	l.quitOnce.Do(func() { close(l.quit) })
-}
-
-func (l *ObjectLister) initPrefixes(prefixes []string) {
-	// We first enqueue all of the prefixes we were given
-	for _, p := range prefixes {
-		l.prefixCh <- p
-	}
-	close(l.prefixCh)
-
-	l.wg.Wait()
-	close(l.resultCh)
 }
 
 func (l *ObjectLister) worker() {
