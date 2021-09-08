@@ -17,12 +17,12 @@ func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*Obj
 	bCopy := *b
 
 	l := ObjectLister{
-		b:       &bCopy,
-		c:       &cCopy,
-		getCh:   make(chan string),
-		putCh:   make(chan []string, 1),
-		quit:    make(chan struct{}),
-		maxKeys: maxKeys,
+		b:        &bCopy,
+		c:        &cCopy,
+		prefixCh: make(chan string),
+		resultCh: make(chan []string, 1),
+		quit:     make(chan struct{}),
+		maxKeys:  maxKeys,
 	}
 
 	for i := 0; i < l.c.Concurrency; i++ {
@@ -41,8 +41,8 @@ type ObjectLister struct {
 
 	next     []string
 	err      error
-	getCh    chan string
-	putCh    chan []string
+	prefixCh chan string
+	resultCh chan []string
 	wg       sync.WaitGroup
 	quit     chan struct{}
 	quitOnce sync.Once
@@ -55,16 +55,16 @@ func (l *ObjectLister) closeQuit() {
 func (l *ObjectLister) initPrefixes(prefixes []string) {
 	// We first enqueue all of the prefixes we were given
 	for _, p := range prefixes {
-		l.getCh <- p
+		l.prefixCh <- p
 	}
-	close(l.getCh)
+	close(l.prefixCh)
 
 	l.wg.Wait()
-	close(l.putCh)
+	close(l.resultCh)
 }
 
 func (l *ObjectLister) worker() {
-	for p := range l.getCh {
+	for p := range l.prefixCh {
 		var continuation string
 	retries:
 		for {
@@ -88,7 +88,7 @@ func (l *ObjectLister) worker() {
 			select {
 			case <-l.quit:
 				return
-			case l.putCh <- keys:
+			case l.resultCh <- keys:
 				continuation = res.NextContinuationToken
 				if continuation != "" {
 					continue
@@ -128,7 +128,7 @@ func (l *ObjectLister) Next() bool {
 	}
 
 	select {
-	case n, ok := <-l.putCh:
+	case n, ok := <-l.resultCh:
 		if !ok {
 			l.err = nil
 			return false
