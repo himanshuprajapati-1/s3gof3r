@@ -193,8 +193,8 @@ func (p *putter) Close() error {
 		len(p.parts) == 0 { // 0 length file
 		p.flush()
 	}
-	p.wg.Wait()
 	close(p.ch)
+	p.wg.Wait()
 	p.closed = true
 	p.sp.Close()
 
