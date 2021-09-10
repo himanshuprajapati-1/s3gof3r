@@ -1,25 +1,28 @@
 // +build !race
 
-package s3gof3r
+package pool
 
 import (
 	"bytes"
-	"io/ioutil"
-	"log"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
 
+type testLogger struct {
+	buf bytes.Buffer
+}
+
+func (logger *testLogger) Printf(format string, a ...interface{}) {
+	fmt.Fprintf(&logger.buf, format, a...)
+}
+
 // The test causes data races due to reading the log buffer and setting bp.time
 func TestBP(t *testing.T) {
-
 	// send log output to buffer
-	lf := *bytes.NewBuffer(nil)
-	SetLogger(&lf, "", log.LstdFlags, true)
-	defer SetLogger(ioutil.Discard, "", log.LstdFlags, true)
-
-	bp := bufferPool(mb)
+	var lf testLogger
+	bp := NewBufferPool(&lf, mb)
 	bp.timeout = 1 * time.Millisecond
 	b := bp.Get()
 	if cap(b) != int(mb) {
@@ -39,10 +42,9 @@ func TestBP(t *testing.T) {
 	bp.Close()
 	expLog := "3 buffers of 1 MB allocated"
 	time.Sleep(1 * time.Millisecond) // wait for log
-	ls := lf.String()
+	ls := lf.buf.String()
 	if !strings.Contains(ls, expLog) {
 		t.Errorf("BP debug logging on quit: \nExpected: %s\nActual: %s",
 			expLog, ls)
 	}
-
 }

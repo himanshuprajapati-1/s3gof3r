@@ -20,6 +20,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/github/s3gof3r/internal/pool"
 )
 
 // defined by amazon
@@ -64,7 +66,7 @@ type putter struct {
 	ETag       string
 	Code       string
 
-	sp *bp
+	sp *pool.BufferPool
 
 	makes    int
 	UploadID string `xml:"UploadId"`
@@ -106,7 +108,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (p *putter, err
 	p.md5OfParts = md5.New()
 	p.md5 = md5.New()
 
-	p.sp = bufferPool(p.bufsz)
+	p.sp = pool.NewBufferPool(bufferPoolLogger{}, p.bufsz)
 
 	return p, nil
 }

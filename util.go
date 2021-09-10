@@ -86,3 +86,9 @@ func checkClose(c io.Closer, err error) {
 	}
 
 }
+
+type bufferPoolLogger struct{}
+
+func (l bufferPoolLogger) Printf(format string, a ...interface{}) {
+	logger.debugPrintf(format, a...)
+}

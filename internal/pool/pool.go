@@ -1,8 +1,19 @@
-package s3gof3r
+package pool
 
 import (
 	"container/list"
 	"time"
+)
+
+// convenience multipliers
+const (
+	_        = iota
+	kb int64 = 1 << (10 * iota)
+	mb
+	gb
+	tb
+	pb
+	eb
 )
 
 type qb struct {
@@ -10,7 +21,7 @@ type qb struct {
 	s    []byte
 }
 
-type bp struct {
+type BufferPool struct {
 	makes   int
 	get     chan []byte
 	give    chan []byte
@@ -19,8 +30,12 @@ type bp struct {
 	sizech  chan int64
 }
 
-func bufferPool(bufsz int64) (sp *bp) {
-	sp = &bp{
+type logger interface {
+	Printf(format string, a ...interface{})
+}
+
+func NewBufferPool(logger logger, bufsz int64) (sp *BufferPool) {
+	sp = &BufferPool{
 		get:     make(chan []byte),
 		give:    make(chan []byte),
 		quit:    make(chan struct{}),
@@ -59,7 +74,7 @@ func bufferPool(bufsz int64) (sp *bp) {
 			case sz := <-sp.sizech: // update buffer size, free buffers
 				bufsz = sz
 			case <-sp.quit:
-				logger.debugPrintf("%d buffers of %d MB allocated", sp.makes, bufsz/(1*mb))
+				logger.Printf("%d buffers of %d MB allocated", sp.makes, bufsz/(1*mb))
 				return
 			}
 		}
@@ -68,18 +83,18 @@ func bufferPool(bufsz int64) (sp *bp) {
 	return sp
 }
 
-func (bp *bp) Get() []byte {
+func (bp *BufferPool) Get() []byte {
 	return <-bp.get
 }
 
-func (bp *bp) Put(buf []byte) {
+func (bp *BufferPool) Put(buf []byte) {
 	bp.give <- buf
 }
 
-func (bp *bp) Close() {
+func (bp *BufferPool) Close() {
 	close(bp.quit)
 }
 
-func (bp *bp) SetBufferSize(bufsz int64) {
+func (bp *BufferPool) SetBufferSize(bufsz int64) {
 	bp.sizech <- bufsz
 }

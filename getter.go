@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/github/s3gof3r/internal/pool"
 )
 
 const qWaitMax = 2
@@ -39,7 +41,7 @@ type getter struct {
 	qWaitLen uint
 	cond     sync.Cond
 
-	sp *bp
+	sp *pool.BufferPool
 
 	closed bool
 	c      *Config
@@ -94,7 +96,7 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	g.chunkTotal = int((g.contentLen + g.bufsz - 1) / g.bufsz) // round up, integer division
 	logger.debugPrintf("object size: %3.2g MB", float64(g.contentLen)/float64((1*mb)))
 
-	g.sp = bufferPool(g.bufsz)
+	g.sp = pool.NewBufferPool(bufferPoolLogger{}, g.bufsz)
 
 	for i := 0; i < g.c.Concurrency; i++ {
 		go g.worker()
