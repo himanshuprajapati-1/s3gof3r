@@ -2,6 +2,7 @@ package pool
 
 import (
 	"container/list"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -23,12 +24,14 @@ type qb struct {
 }
 
 type BufferPool struct {
-	makes   uint64
-	get     chan []byte
-	give    chan []byte
-	quit    chan struct{}
-	timeout time.Duration
-	sizech  chan int64
+	makes     uint64
+	get       chan []byte
+	give      chan []byte
+	quit      chan struct{}
+	timeout   time.Duration
+	sizech    chan int64
+	timeoutCh chan time.Duration
+	wg        sync.WaitGroup
 }
 
 type logger interface {
@@ -37,13 +40,18 @@ type logger interface {
 
 func NewBufferPool(logger logger, bufsz int64) (sp *BufferPool) {
 	sp = &BufferPool{
-		get:     make(chan []byte),
-		give:    make(chan []byte),
-		quit:    make(chan struct{}),
-		timeout: time.Minute,
-		sizech:  make(chan int64),
+		get:       make(chan []byte),
+		give:      make(chan []byte),
+		quit:      make(chan struct{}),
+		timeout:   time.Minute,
+		sizech:    make(chan int64),
+		timeoutCh: make(chan time.Duration),
 	}
+
+	sp.wg.Add(1)
 	go func() {
+		defer sp.wg.Done()
+
 		q := new(list.List)
 		for {
 			if q.Len() == 0 {
@@ -82,6 +90,8 @@ func NewBufferPool(logger logger, bufsz int64) (sp *BufferPool) {
 				}
 			case sz := <-sp.sizech: // update buffer size, free buffers
 				bufsz = sz
+			case timeout := <-sp.timeoutCh:
+				sp.timeout = timeout
 			case <-sp.quit:
 				logger.Printf("%d buffers of %d MB allocated", sp.makes, bufsz/(1*mb))
 				return
@@ -102,10 +112,15 @@ func (bp *BufferPool) Put(buf []byte) {
 
 func (bp *BufferPool) Close() {
 	close(bp.quit)
+	bp.wg.Wait()
 }
 
 func (bp *BufferPool) SetBufferSize(bufsz int64) {
 	bp.sizech <- bufsz
+}
+
+func (bp *BufferPool) SetTimeout(timeout time.Duration) {
+	bp.timeoutCh <- timeout
 }
 
 func (bp *BufferPool) AllocationCount() uint64 {

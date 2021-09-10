@@ -1,29 +1,38 @@
-// +build !race
-
 package pool
 
 import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type testLogger struct {
-	buf bytes.Buffer
+	lock sync.Mutex
+	buf  bytes.Buffer
 }
 
 func (logger *testLogger) Printf(format string, a ...interface{}) {
+	logger.lock.Lock()
+	defer logger.lock.Unlock()
+
 	fmt.Fprintf(&logger.buf, format, a...)
 }
 
-// The test causes data races due to reading the log buffer and setting bp.time
+func (logger *testLogger) String() string {
+	logger.lock.Lock()
+	defer logger.lock.Unlock()
+
+	return logger.buf.String()
+}
+
 func TestBP(t *testing.T) {
 	// send log output to buffer
 	var lf testLogger
 	bp := NewBufferPool(&lf, mb)
-	bp.timeout = 1 * time.Millisecond
+	bp.SetTimeout(1 * time.Millisecond)
 	b := bp.Get()
 	if cap(b) != int(mb) {
 		t.Errorf("Expected buffer capacity: %d. Actual: %d", kb, cap(b))
@@ -42,7 +51,7 @@ func TestBP(t *testing.T) {
 	bp.Close()
 	expLog := "3 buffers of 1 MB allocated"
 	time.Sleep(1 * time.Millisecond) // wait for log
-	ls := lf.buf.String()
+	ls := lf.String()
 	if !strings.Contains(ls, expLog) {
 		t.Errorf("BP debug logging on quit: \nExpected: %s\nActual: %s",
 			expLog, ls)
