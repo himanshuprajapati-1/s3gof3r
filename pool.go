@@ -16,7 +16,6 @@ type bp struct {
 	give    chan []byte
 	quit    chan struct{}
 	timeout time.Duration
-	bufsz   int64
 	sizech  chan int64
 }
 
