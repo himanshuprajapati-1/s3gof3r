@@ -2,6 +2,7 @@ package pool
 
 import (
 	"container/list"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,7 +23,7 @@ type qb struct {
 }
 
 type BufferPool struct {
-	makes   int
+	makes   uint64
 	get     chan []byte
 	give    chan []byte
 	quit    chan struct{}
@@ -47,7 +48,7 @@ func NewBufferPool(logger logger, bufsz int64) (sp *BufferPool) {
 		for {
 			if q.Len() == 0 {
 				q.PushFront(qb{when: time.Now(), s: make([]byte, bufsz)})
-				sp.makes++
+				atomic.AddUint64(&sp.makes, 1)
 			}
 
 			e := q.Front()
@@ -97,4 +98,8 @@ func (bp *BufferPool) Close() {
 
 func (bp *BufferPool) SetBufferSize(bufsz int64) {
 	bp.sizech <- bufsz
+}
+
+func (bp *BufferPool) AllocationCount() uint64 {
+	return atomic.LoadUint64(&bp.makes)
 }

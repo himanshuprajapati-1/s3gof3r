@@ -29,15 +29,15 @@ func TestBP(t *testing.T) {
 		t.Errorf("Expected buffer capacity: %d. Actual: %d", kb, cap(b))
 	}
 	bp.Put(b)
-	if bp.makes != 2 {
-		t.Errorf("Expected makes: %d. Actual: %d", 2, bp.makes)
+	if n := bp.AllocationCount(); n != 2 {
+		t.Errorf("Expected makes: %d. Actual: %d", 2, n)
 	}
 
 	b = bp.Get()
 	bp.Put(b)
 	time.Sleep(2 * time.Millisecond)
-	if bp.makes != 3 {
-		t.Errorf("Expected makes: %d. Actual: %d", 3, bp.makes)
+	if n := bp.AllocationCount(); n != 3 {
+		t.Errorf("Expected makes: %d. Actual: %d", 3, n)
 	}
 	bp.Close()
 	expLog := "3 buffers of 1 MB allocated"
