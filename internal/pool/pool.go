@@ -53,7 +53,15 @@ func NewBufferPool(logger logger, bufsz int64) (sp *BufferPool) {
 
 			e := q.Front()
 
+			// Discard `e`, but not if it's the only item in `q`
+			// (otherwise we'll just create it again the next time
+			// through the loop):
 			timeout := time.NewTimer(sp.timeout)
+			var stale <-chan time.Time
+			if q.Len() > 1 {
+				stale = timeout.C
+			}
+
 			select {
 			case b := <-sp.give:
 				timeout.Stop()
@@ -61,7 +69,7 @@ func NewBufferPool(logger logger, bufsz int64) (sp *BufferPool) {
 			case sp.get <- e.Value.(qb).s:
 				timeout.Stop()
 				q.Remove(e)
-			case <-timeout.C:
+			case <-stale:
 				// free unused slices older than timeout
 				e := q.Front()
 				for e != nil {
