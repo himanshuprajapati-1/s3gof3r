@@ -168,7 +168,7 @@ func (g *getter) worker() {
 
 func (g *getter) retryGetChunk(c *chunk) {
 	var err error
-	c.b = <-g.sp.get
+	c.b = g.sp.Get()
 	for i := 0; i < g.c.NTry; i++ {
 		err = g.getChunk(c)
 		if err == nil {
@@ -265,7 +265,7 @@ func (g *getter) Read(p []byte) (int, error) {
 		g.bytesRead += int64(n)
 
 		if g.cIdx >= g.rChunk.size { // chunk complete
-			g.sp.give <- g.rChunk.b
+			g.sp.Put(g.rChunk.b)
 			g.chunkID++
 			g.rChunk = nil
 		}
@@ -310,7 +310,7 @@ func (g *getter) Close() error {
 		return syscall.EINVAL
 	}
 	g.closed = true
-	close(g.sp.quit)
+	g.sp.Close()
 	close(g.quit)
 	g.cond.Broadcast()
 	if g.err != nil {

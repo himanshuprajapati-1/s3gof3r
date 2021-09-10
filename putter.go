@@ -123,7 +123,7 @@ func (p *putter) Write(b []byte) (int, error) {
 	nw := 0
 	for nw < len(b) {
 		if p.buf == nil {
-			p.buf = <-p.sp.get
+			p.buf = p.sp.Get()
 			if int64(cap(p.buf)) < p.bufsz {
 				p.buf = make([]byte, p.bufsz)
 				runtime.GC()
@@ -164,7 +164,7 @@ func (p *putter) flush() {
 	// to reach the 5 Terabyte max object size, initial part size must be ~85 MB
 	if p.part%2000 == 0 && p.part < maxNPart && growPartSize(p.part, p.bufsz, p.putsz) {
 		p.bufsz = min64(p.bufsz*2, maxPartSize)
-		p.sp.sizech <- p.bufsz // update pool buffer size
+		p.sp.SetBufferSize(p.bufsz) // update pool buffer size
 		logger.debugPrintf("part size doubled to %d", p.bufsz)
 	}
 }
@@ -182,7 +182,7 @@ func (p *putter) retryPutPart(part *part) {
 	for i := 0; i < p.c.NTry; i++ {
 		err = p.putPart(part)
 		if err == nil {
-			p.sp.give <- part.b
+			p.sp.Put(part.b)
 			part.b = nil
 			return
 		}
@@ -243,7 +243,7 @@ func (p *putter) Close() (err error) {
 	p.wg.Wait()
 	close(p.ch)
 	p.closed = true
-	close(p.sp.quit)
+	p.sp.Close()
 
 	// check p.err before completing
 	if p.err != nil {

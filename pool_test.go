@@ -21,22 +21,22 @@ func TestBP(t *testing.T) {
 
 	bp := bufferPool(mb)
 	bp.timeout = 1 * time.Millisecond
-	b := <-bp.get
+	b := bp.Get()
 	if cap(b) != int(mb) {
 		t.Errorf("Expected buffer capacity: %d. Actual: %d", kb, cap(b))
 	}
-	bp.give <- b
+	bp.Put(b)
 	if bp.makes != 2 {
 		t.Errorf("Expected makes: %d. Actual: %d", 2, bp.makes)
 	}
 
-	b = <-bp.get
-	bp.give <- b
+	b = bp.Get()
+	bp.Put(b)
 	time.Sleep(2 * time.Millisecond)
 	if bp.makes != 3 {
 		t.Errorf("Expected makes: %d. Actual: %d", 3, bp.makes)
 	}
-	close(bp.quit)
+	bp.Close()
 	expLog := "3 buffers of 1 MB allocated"
 	time.Sleep(1 * time.Millisecond) // wait for log
 	ls := lf.String()

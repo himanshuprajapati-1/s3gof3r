@@ -67,3 +67,19 @@ func bufferPool(bufsz int64) (sp *bp) {
 	}()
 	return sp
 }
+
+func (bp *bp) Get() []byte {
+	return <-bp.get
+}
+
+func (bp *bp) Put(buf []byte) {
+	bp.give <- buf
+}
+
+func (bp *bp) Close() {
+	close(bp.quit)
+}
+
+func (bp *bp) SetBufferSize(bufsz int64) {
+	bp.sizech <- bufsz
+}
