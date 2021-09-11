@@ -133,6 +133,11 @@ func (l *ObjectLister) retryListObjects(
 		if timer == nil {
 			timer = time.NewTimer(duration)
 		} else {
+			// The only way to get here is if the timer was created
+			// during an earlier iteration of the loop, in which case
+			// the select below must have gone through the `<-timer.C`
+			// branch, which drained the timer. So it is safe to call
+			// `Reset()`:
 			timer.Reset(duration)
 		}
 
