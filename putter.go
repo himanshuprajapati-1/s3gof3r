@@ -81,8 +81,8 @@ type putter struct {
 // See http://docs.amazonwebservices.com/AmazonS3/latest/dev/mpuoverview.html.
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
-func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (p *putter, err error) {
-	p = new(putter)
+func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
+	p := new(putter)
 	p.url = url
 	p.c, p.b = new(Config), new(Bucket)
 	*p.c, *p.b = *c, *b
@@ -93,14 +93,19 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (p *putter, err
 	if err != nil {
 		return nil, err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return nil, newRespError(resp)
 	}
+
 	err = xml.NewDecoder(resp.Body).Decode(p)
+	closeErr := resp.Body.Close()
 	if err != nil {
 		return nil, err
 	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+
 	p.ch = make(chan *part)
 	for i := 0; i < p.c.Concurrency; i++ {
 		go p.worker()
@@ -214,10 +219,13 @@ func (p *putter) putPart(part *part) error {
 	if err != nil {
 		return err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
+	if err := resp.Body.Close(); err != nil {
+		return err
+	}
+
 	s := resp.Header.Get("etag")
 	if len(s) < 2 {
 		return fmt.Errorf("Got Bad etag:%s", s)
@@ -229,7 +237,7 @@ func (p *putter) putPart(part *part) error {
 	return nil
 }
 
-func (p *putter) Close() (err error) {
+func (p *putter) Close() error {
 	if p.closed {
 		p.abort()
 		return syscall.EINVAL
@@ -256,62 +264,23 @@ func (p *putter) Close() (err error) {
 	body, err := xml.Marshal(p.xml)
 	if err != nil {
 		p.abort()
-		return
+		return err
 	}
 
-	for retries := 0; retries < 5; retries++ {
-		b := bytes.NewReader(body)
-		v := url.Values{}
-		v.Set("uploadId", p.UploadID)
-
-		var resp *http.Response
-		resp, err = p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
-		if err != nil {
-			// If the connection got closed (firwall, proxy, etc.)
-			// we should also retry, just like if we'd had a 500.
-			if err == io.ErrUnexpectedEOF {
-				continue
-			}
-
-			p.abort()
-			return
-		}
-		defer checkClose(resp.Body, err)
-		if resp.StatusCode != 200 {
-			p.abort()
-			return newRespError(resp)
+	attemptsLeft := 5
+	for {
+		retryable, err := p.tryPut(body)
+		if err == nil {
+			// Success!
+			break
 		}
 
-		// S3 will return an error under a 200 as well. Instead of the
-		// CompleteMultipartUploadResult that we expect below, we might be
-		// getting an Error, e.g. with InternalError under it. We should behave
-		// in that case as though we received a 500 and try again.
-
-		p.Code = ""
-		// Parse etag from body of response
-		err = xml.NewDecoder(resp.Body).Decode(p)
-		if err != nil {
-			// The decoder unfortunately returns string error
-			// instead of specific errors.
-			if err.Error() == "unexpected EOF" {
-				continue
-			}
-
-			return
+		attemptsLeft--
+		if !retryable || attemptsLeft == 0 {
+			return err
 		}
-
-		// This is what S3 returns instead of a 500 when we should try
-		// to complete the multipart upload again
-		if p.Code == "InternalError" {
-			continue
-		}
-		// Some other generic error
-		if p.Code != "" {
-			return fmt.Errorf("CompleteMultipartUpload error: %s", p.Code)
-		}
-
-		break
 	}
+
 	// Check md5 hash of concatenated part md5 hashes against ETag
 	// more info: https://forums.aws.amazon.com/thread.jspa?messageID=456442&#456442
 	calculatedMd5ofParts := fmt.Sprintf("%x", p.md5OfParts.Sum(nil))
@@ -335,7 +304,68 @@ func (p *putter) Close() (err error) {
 			}
 		}
 	}
-	return
+	return nil
+}
+
+// tryPut makes one attempt at putting `body` via `p`. Return:
+//
+// * `false, nil` on success;
+// * `true, err` if there was a retryable error;
+// * `false, err` if there was an unretryable error.
+func (p *putter) tryPut(body []byte) (bool, error) {
+	b := bytes.NewReader(body)
+	v := url.Values{}
+	v.Set("uploadId", p.UploadID)
+
+	resp, err := p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
+	if err != nil {
+		// If the connection got closed (firwall, proxy, etc.)
+		// we should also retry, just like if we'd had a 500.
+		if err == io.ErrUnexpectedEOF {
+			return true, err
+		}
+
+		p.abort()
+		return false, err
+	}
+	if resp.StatusCode != 200 {
+		p.abort()
+		return false, newRespError(resp)
+	}
+
+	// S3 will return an error under a 200 as well. Instead of the
+	// CompleteMultipartUploadResult that we expect below, we might be
+	// getting an Error, e.g. with InternalError under it. We should behave
+	// in that case as though we received a 500 and try again.
+
+	p.Code = ""
+	// Parse etag from body of response
+	err = xml.NewDecoder(resp.Body).Decode(p)
+	closeErr := resp.Body.Close()
+	if err != nil {
+		// The decoder unfortunately returns string error
+		// instead of specific errors.
+		if err.Error() == "unexpected EOF" {
+			return true, err
+		}
+
+		return false, err
+	}
+	if closeErr != nil {
+		return true, closeErr
+	}
+
+	// This is what S3 returns instead of a 500 when we should try
+	// to complete the multipart upload again
+	if p.Code == "InternalError" {
+		return true, errors.New("S3 internal error")
+	}
+	// Some other generic error
+	if p.Code != "" {
+		return false, fmt.Errorf("CompleteMultipartUpload error: %s", p.Code)
+	}
+
+	return false, nil
 }
 
 // Try to abort multipart upload. Do not error on failure.
@@ -348,10 +378,11 @@ func (p *putter) abort() {
 		logger.Printf("Error aborting multipart upload: %v\n", err)
 		return
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 204 {
 		logger.Printf("Error aborting multipart upload: %v", newRespError(resp))
 	}
+	_ = resp.Body.Close()
+
 	return
 }
 
@@ -376,7 +407,7 @@ func (p *putter) hashContent(r io.ReadSeeker) (string, string, string, error) {
 // Put md5 file in .md5 subdirectory of bucket  where the file is stored
 // e.g. the md5 for https://mybucket.s3.amazonaws.com/gof3r will be stored in
 // https://mybucket.s3.amazonaws.com/.md5/gof3r.md5
-func (p *putter) putMd5() (err error) {
+func (p *putter) putMd5() error {
 	calcMd5 := fmt.Sprintf("%x", p.md5.Sum(nil))
 	md5Reader := strings.NewReader(calcMd5)
 	md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
@@ -388,18 +419,21 @@ func (p *putter) putMd5() (err error) {
 	logger.debugPrintln("md5Path: ", md5Path)
 	r, err := http.NewRequest("PUT", md5Url.String(), md5Reader)
 	if err != nil {
-		return
+		return err
 	}
 	p.b.Sign(r)
 	resp, err := p.c.Client.Do(r)
 	if err != nil {
-		return
+		return err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return newRespError(resp)
 	}
-	return
+	if err := resp.Body.Close(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 var err500 = errors.New("received 500 from server")

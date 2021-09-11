@@ -80,7 +80,6 @@ func deleteMultiple(c *Config, b *Bucket, quiet bool, keys []string) (DeleteResu
 	if err != nil {
 		return DeleteResult{}, err
 	}
-	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return DeleteResult{}, newRespError(resp)
 	}
@@ -88,6 +87,11 @@ func deleteMultiple(c *Config, b *Bucket, quiet bool, keys []string) (DeleteResu
 	var result DeleteResult
 	decoder := xml.NewDecoder(resp.Body)
 	if err := decoder.Decode(&result); err != nil {
+		_ = resp.Body.Close()
+		return DeleteResult{}, err
+	}
+
+	if err := resp.Body.Close(); err != nil {
 		return DeleteResult{}, err
 	}
 
