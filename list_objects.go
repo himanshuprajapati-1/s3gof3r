@@ -1,78 +1,94 @@
 package s3gof3r
 
 import (
+	"context"
 	"encoding/xml"
 	"math"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func newObjectLister(c *Config, b *Bucket, prefixes []string, maxKeys int) (*ObjectLister, error) {
-	l := new(ObjectLister)
-	l.c, l.b = new(Config), new(Bucket)
-	*l.c, *l.b = *c, *b
-	l.c.NTry = max(c.NTry, 1)
-	l.c.Concurrency = max(c.Concurrency, 1)
-	l.getCh, l.putCh = make(chan string), make(chan []string, 1)
-	l.quit = make(chan struct{})
-	l.prefixes = prefixes
-	l.maxKeys = maxKeys
+	cCopy := *c
+	cCopy.NTry = max(c.NTry, 1)
+	cCopy.Concurrency = max(c.Concurrency, 1)
 
-	for i := 0; i < l.c.Concurrency; i++ {
-		l.wg.Add(1)
-		go l.worker()
+	bCopy := *b
+
+	ctx, cancel := context.WithCancel(context.TODO())
+
+	l := ObjectLister{
+		cancel:   cancel,
+		b:        &bCopy,
+		c:        &cCopy,
+		prefixCh: make(chan string, len(prefixes)),
+		resultCh: make(chan []string, 1),
+		maxKeys:  maxKeys,
 	}
-	go l.initPrefixes()
 
-	return l, nil
+	// Enqueue all of the prefixes that we were given. This won't
+	// block because we have initialized `prefixCh` to be long enough
+	// to hold all of them. This has the added benefit that there is
+	// no data race if the caller happens to modify the contents of
+	// the slice after this call returns.
+	for _, p := range prefixes {
+		l.prefixCh <- p
+	}
+	close(l.prefixCh)
+
+	eg, ctx := errgroup.WithContext(ctx)
+
+	for i := 0; i < min(l.c.Concurrency, len(prefixes)); i++ {
+		eg.Go(func() error {
+			return l.worker(ctx)
+		})
+	}
+
+	go func() {
+		l.finalErr = eg.Wait()
+		close(l.resultCh)
+		l.cancel()
+	}()
+
+	return &l, nil
 }
 
 type ObjectLister struct {
-	b        *Bucket
-	c        *Config
-	prefixes []string
-	maxKeys  int
+	cancel context.CancelFunc
 
-	next     []string
-	err      error
-	getCh    chan string
-	putCh    chan []string
-	wg       sync.WaitGroup
-	quit     chan struct{}
-	quitOnce sync.Once
+	b       *Bucket
+	c       *Config
+	maxKeys int
+
+	prefixCh chan string
+	resultCh chan []string
+
+	// finalErr is set before closing `resultCh` if any of the workers
+	// returned errors. Any subsequent calls to `Next()` report this
+	// error.
+	finalErr error
+
+	// currentValue and currentErr are the "results" of the most
+	// recent call to `Next()`.
+	currentValue []string
+	currentErr   error
 }
 
-func (l *ObjectLister) closeQuit() {
-	l.quitOnce.Do(func() { close(l.quit) })
-}
-
-func (l *ObjectLister) initPrefixes() {
-	// We first enqueue all of the prefixes we were given
-	for _, p := range l.prefixes {
-		l.getCh <- p
-	}
-	close(l.getCh)
-
-	l.wg.Wait()
-	close(l.putCh)
-}
-
-func (l *ObjectLister) worker() {
-	for p := range l.getCh {
+func (l *ObjectLister) worker(ctx context.Context) error {
+	for p := range l.prefixCh {
 		var continuation string
 	retries:
 		for {
-			res, err := l.retryListObjects(p, continuation)
+			res, err := l.retryListObjects(ctx, p, continuation)
 			if err != nil {
 				select {
-				case <-l.quit:
-					return
+				case <-ctx.Done():
+					return ctx.Err()
 				default:
-					l.err = err
-					l.closeQuit()
-					return
+					return err
 				}
 			}
 
@@ -82,9 +98,9 @@ func (l *ObjectLister) worker() {
 			}
 
 			select {
-			case <-l.quit:
-				return
-			case l.putCh <- keys:
+			case <-ctx.Done():
+				return ctx.Err()
+			case l.resultCh <- keys:
 				continuation = res.NextContinuationToken
 				if continuation != "" {
 					continue
@@ -96,12 +112,15 @@ func (l *ObjectLister) worker() {
 		}
 	}
 
-	l.wg.Done()
+	return nil
 }
 
-func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResult, error) {
+func (l *ObjectLister) retryListObjects(
+	ctx context.Context, p, continuation string,
+) (*listBucketResult, error) {
 	var err error
 	var res *listBucketResult
+	var timer *time.Timer
 	for i := 0; i < l.c.NTry; i++ {
 		opts := listObjectsOptions{MaxKeys: l.maxKeys, Prefix: p, ContinuationToken: continuation}
 		res, err = listObjects(l.c, l.b, opts)
@@ -109,7 +128,27 @@ func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResu
 			return res, nil
 		}
 
-		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
+		// Exponential back-off, reusing the timer if possible:
+		duration := time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond
+		if timer == nil {
+			timer = time.NewTimer(duration)
+		} else {
+			// The only way to get here is if the timer was created
+			// during an earlier iteration of the loop, in which case
+			// the select below must have gone through the `<-timer.C`
+			// branch, which drained the timer. So it is safe to call
+			// `Reset()`:
+			timer.Reset(duration)
+		}
+
+		select {
+		case <-timer.C:
+			// Timer has fired and been drained, so it is ready for reuse.
+		case <-ctx.Done():
+			// Stop the timer to prevent a resource leak:
+			timer.Stop()
+			return nil, ctx.Err()
+		}
 	}
 
 	return nil, err
@@ -119,34 +158,27 @@ func (l *ObjectLister) retryListObjects(p, continuation string) (*listBucketResu
 // are more results, or false if there are no more results or there was an
 // error.
 func (l *ObjectLister) Next() bool {
-	if l.err != nil {
+	var ok bool
+	l.currentValue, ok = <-l.resultCh
+	if !ok {
+		// If there has been an error, we now show it to the caller:
+		l.currentErr = l.finalErr
 		return false
 	}
 
-	select {
-	case n, ok := <-l.putCh:
-		if !ok {
-			l.err = nil
-			return false
-		}
-
-		l.next = n
-		return true
-	case <-l.quit:
-		return false
-	}
+	return true
 }
 
 func (l *ObjectLister) Value() []string {
-	return l.next
+	return l.currentValue
 }
 
 func (l *ObjectLister) Error() error {
-	return l.err
+	return l.currentErr
 }
 
 func (l *ObjectLister) Close() {
-	l.closeQuit()
+	l.cancel()
 }
 
 // ListObjectsOptions specifies the options for a ListObjects operation on a S3
