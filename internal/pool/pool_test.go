@@ -44,7 +44,12 @@ func TestBP(t *testing.T) {
 
 	b = bp.Get()
 	bp.Put(b)
-	time.Sleep(2 * time.Millisecond)
+
+	// Give the pool time to realize that the existing buffers are
+	// older than the timeout and to free them. Yes, this is
+	// timing-dependent and therefore potentially flaky:
+	time.Sleep(5 * time.Millisecond)
+
 	if n := bp.AllocationCount(); n != 3 {
 		t.Errorf("Expected makes: %d. Actual: %d", 3, n)
 	}
