@@ -367,20 +367,28 @@ func (p *putter) completeMultipartUpload() (bool, error) {
 
 // Try to abort multipart upload. Do not error on failure.
 func (p *putter) abort() {
+	err := p.abortMultipartUpload()
+	if err != nil {
+		logger.Printf("Error aborting multipart upload: %v\n", err)
+	}
+}
+
+// abortMultipartUpload aborts the multipart upload represented by
+// `p`, discarding any partly-uploaded contents.
+func (p *putter) abortMultipartUpload() error {
 	v := url.Values{}
 	v.Set("uploadId", p.uploadID)
 	s := p.url.String() + "?" + v.Encode()
 	resp, err := p.retryRequest("DELETE", s, nil, nil)
 	if err != nil {
-		logger.Printf("Error aborting multipart upload: %v\n", err)
-		return
+		return err
 	}
 	if resp.StatusCode != 204 {
-		logger.Printf("Error aborting multipart upload: %v", newRespError(resp))
+		return newRespError(resp)
 	}
 	_ = resp.Body.Close()
 
-	return
+	return nil
 }
 
 // Md5 functions
