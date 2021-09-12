@@ -55,7 +55,6 @@ type putter struct {
 	buf        []byte
 	bufbytes   int // bytes written to current buffer
 	ch         chan *part
-	part       int
 	closed     bool
 	err        error
 	wg         sync.WaitGroup
@@ -143,7 +142,8 @@ func (p *putter) flush() {
 
 	// if necessary, double buffer size every 2000 parts due to the 10000-part AWS limit
 	// to reach the 5 Terabyte max object size, initial part size must be ~85 MB
-	if p.part%2000 == 0 && p.part < maxNPart && growPartSize(p.part, p.bufsz, p.putsz) {
+	n := len(p.parts)
+	if n%2000 == 0 && n < maxNPart && growPartSize(n, p.bufsz, p.putsz) {
 		p.bufsz = min64(p.bufsz*2, maxPartSize)
 		p.sp.SetBufferSize(p.bufsz) // update pool buffer size
 		logger.debugPrintf("part size doubled to %d", p.bufsz)
@@ -156,11 +156,10 @@ func (p *putter) flush() {
 // anything to cause the part to get uploaded. FIXME: the part is
 // returned even if there is an error hashing the data.
 func (p *putter) addPart(buf []byte) (*part, error) {
-	p.part++
 	p.putsz += int64(len(buf))
 	part := &part{
 		b:          buf,
-		partNumber: p.part,
+		partNumber: len(p.parts) + 1,
 	}
 	var err error
 	part.md5, part.sha256, part.eTag, err = p.hashContent(part.b)
@@ -241,7 +240,7 @@ func (p *putter) Close() error {
 		return p.err
 	}
 	if p.bufbytes > 0 || // partial part
-		p.part == 0 { // 0 length file
+		len(p.parts) == 0 { // 0 length file
 		p.flush()
 	}
 	p.wg.Wait()
