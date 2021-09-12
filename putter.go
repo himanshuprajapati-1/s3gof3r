@@ -276,8 +276,8 @@ func (p *putter) Close() error {
 	// Check md5 hash of concatenated part md5 hashes against ETag
 	// more info: https://forums.aws.amazon.com/thread.jspa?messageID=456442&#456442
 	calculatedMd5ofParts := fmt.Sprintf("%x", p.md5OfParts.Sum(nil))
-	// Trim quotes '"' and strip part count from end.
-	remoteMd5ofParts := strings.Trim(p.ETag, "\"")
+	// Strip part count from end:
+	remoteMd5ofParts := p.ETag
 	remoteMd5ofParts = strings.Split(remoteMd5ofParts, "-")[0]
 	if len(remoteMd5ofParts) == 0 {
 		return fmt.Errorf("Nil ETag")
@@ -364,7 +364,7 @@ func (p *putter) completeMultipartUpload() (bool, error) {
 		return false, fmt.Errorf("CompleteMultipartUpload error: %s", r.Code)
 	}
 
-	p.ETag = r.ETag
+	p.ETag = strings.Trim(r.ETag, "\"")
 
 	return false, nil
 }
