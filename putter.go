@@ -275,6 +275,7 @@ func (p *putter) Close() error {
 
 		attemptsLeft--
 		if !retryable || attemptsLeft == 0 {
+			p.abort()
 			return err
 		}
 	}
