@@ -137,21 +137,13 @@ func (p *putter) Write(b []byte) (int, error) {
 
 func (p *putter) flush() {
 	p.wg.Add(1)
-	p.part++
-	p.putsz += int64(p.bufbytes)
-	part := &part{
-		b:          p.buf[:p.bufbytes],
-		PartNumber: p.part,
-	}
-	var err error
-	part.md5, part.sha256, part.ETag, err = p.hashContent(part.b)
+	part, err := p.addPart(p.buf[:p.bufbytes])
 	if err != nil {
 		p.err = err
 	}
-
-	p.xml.Part = append(p.xml.Part, part)
-	p.ch <- part
 	p.buf, p.bufbytes = nil, 0
+
+	p.ch <- part
 
 	// if necessary, double buffer size every 2000 parts due to the 10000-part AWS limit
 	// to reach the 5 Terabyte max object size, initial part size must be ~85 MB
@@ -160,6 +152,26 @@ func (p *putter) flush() {
 		p.sp.SetBufferSize(p.bufsz) // update pool buffer size
 		logger.debugPrintf("part size doubled to %d", p.bufsz)
 	}
+}
+
+// newPart creates a new "multipart upload" part containing the bytes
+// in `buf`, assigns it a part number, hashes its contents into
+// `p.md5`, adds it to `p.xml.Part`, and returns it. It does not do
+// anything to cause the part to get uploaded. FIXME: the part is
+// returned even if there is an error hashing the data.
+func (p *putter) addPart(buf []byte) (*part, error) {
+	p.part++
+	p.putsz += int64(len(buf))
+	part := &part{
+		b:          buf,
+		PartNumber: p.part,
+	}
+	var err error
+	part.md5, part.sha256, part.ETag, err = p.hashContent(part.b)
+
+	p.xml.Part = append(p.xml.Part, part)
+
+	return part, err
 }
 
 func (p *putter) worker() {
