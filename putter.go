@@ -61,7 +61,7 @@ type putter struct {
 	wg         sync.WaitGroup
 	md5OfParts hash.Hash
 	md5        hash.Hash
-	ETag       string
+	eTag       string
 
 	sp *pool.BufferPool
 
@@ -229,7 +229,7 @@ func (p *putter) uploadPart(part *part) error {
 	}
 	s = s[1 : len(s)-1] // includes quote chars for some reason
 	if part.ETag != s {
-		return fmt.Errorf("Response etag does not match. Remote:%s Calculated:%s", s, p.ETag)
+		return fmt.Errorf("Response etag does not match. Remote:%s Calculated:%s", s, p.eTag)
 	}
 	return nil
 }
@@ -277,7 +277,7 @@ func (p *putter) Close() error {
 	// more info: https://forums.aws.amazon.com/thread.jspa?messageID=456442&#456442
 	calculatedMd5ofParts := fmt.Sprintf("%x", p.md5OfParts.Sum(nil))
 	// Strip part count from end:
-	remoteMd5ofParts := p.ETag
+	remoteMd5ofParts := p.eTag
 	remoteMd5ofParts = strings.Split(remoteMd5ofParts, "-")[0]
 	if len(remoteMd5ofParts) == 0 {
 		return fmt.Errorf("Nil ETag")
@@ -364,7 +364,7 @@ func (p *putter) completeMultipartUpload() (bool, error) {
 		return false, fmt.Errorf("CompleteMultipartUpload error: %s", r.Code)
 	}
 
-	p.ETag = strings.Trim(r.ETag, "\"")
+	p.eTag = strings.Trim(r.ETag, "\"")
 
 	return false, nil
 }
