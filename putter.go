@@ -89,26 +89,12 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	p.c.Concurrency = max(c.Concurrency, 1)
 	p.c.NTry = max(c.NTry, 1)
 	p.bufsz = max64(minPartSize, c.PartSize)
-	resp, err := p.retryRequest("POST", url.String()+"?uploads", nil, h)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != 200 {
-		return nil, newRespError(resp)
-	}
 
-	var r struct {
-		UploadID string `xml:"UploadId"`
-	}
-	err = xml.NewDecoder(resp.Body).Decode(&r)
-	closeErr := resp.Body.Close()
+	var err error
+	p.uploadID, err = p.startMultipartUpload(h)
 	if err != nil {
 		return nil, err
 	}
-	if closeErr != nil {
-		return nil, closeErr
-	}
-	p.uploadID = r.UploadID
 
 	p.ch = make(chan *part)
 	for i := 0; i < p.c.Concurrency; i++ {
@@ -438,6 +424,30 @@ func (p *putter) putMd5() error {
 	}
 
 	return nil
+}
+
+func (p *putter) startMultipartUpload(h http.Header) (string, error) {
+	resp, err := p.retryRequest("POST", p.url.String()+"?uploads", nil, h)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != 200 {
+		return "", newRespError(resp)
+	}
+
+	var r struct {
+		UploadID string `xml:"UploadId"`
+	}
+
+	err = xml.NewDecoder(resp.Body).Decode(&r)
+	closeErr := resp.Body.Close()
+	if err != nil {
+		return "", err
+	}
+	if closeErr != nil {
+		return r.UploadID, closeErr
+	}
+	return r.UploadID, nil
 }
 
 var err500 = errors.New("received 500 from server")
