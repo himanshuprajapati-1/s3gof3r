@@ -69,7 +69,7 @@ type putter struct {
 	sp *pool.BufferPool
 
 	makes    int
-	UploadID string `xml:"UploadId"`
+	uploadID string
 	xml      struct {
 		XMLName string `xml:"CompleteMultipartUpload"`
 		Part    []*part
@@ -97,7 +97,10 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 		return nil, newRespError(resp)
 	}
 
-	err = xml.NewDecoder(resp.Body).Decode(p)
+	var r struct {
+		UploadID string `xml:"UploadId"`
+	}
+	err = xml.NewDecoder(resp.Body).Decode(&r)
 	closeErr := resp.Body.Close()
 	if err != nil {
 		return nil, err
@@ -105,6 +108,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	if closeErr != nil {
 		return nil, closeErr
 	}
+	p.uploadID = r.UploadID
 
 	p.ch = make(chan *part)
 	for i := 0; i < p.c.Concurrency; i++ {
@@ -203,7 +207,7 @@ func (p *putter) retryPutPart(part *part) {
 func (p *putter) putPart(part *part) error {
 	v := url.Values{}
 	v.Set("partNumber", strconv.Itoa(part.PartNumber))
-	v.Set("uploadId", p.UploadID)
+	v.Set("uploadId", p.uploadID)
 	if _, err := part.r.Seek(0, 0); err != nil { // move back to beginning, if retrying
 		return err
 	}
@@ -315,7 +319,7 @@ func (p *putter) Close() error {
 func (p *putter) tryPut(body []byte) (bool, error) {
 	b := bytes.NewReader(body)
 	v := url.Values{}
-	v.Set("uploadId", p.UploadID)
+	v.Set("uploadId", p.uploadID)
 
 	resp, err := p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
 	if err != nil {
@@ -371,7 +375,7 @@ func (p *putter) tryPut(body []byte) (bool, error) {
 // Try to abort multipart upload. Do not error on failure.
 func (p *putter) abort() {
 	v := url.Values{}
-	v.Set("uploadId", p.UploadID)
+	v.Set("uploadId", p.uploadID)
 	s := p.url.String() + "?" + v.Encode()
 	resp, err := p.retryRequest("DELETE", s, nil, nil)
 	if err != nil {
