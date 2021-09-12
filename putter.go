@@ -290,9 +290,6 @@ func (p *putter) Close() error {
 		return fmt.Errorf("Nil ETag")
 	}
 	if calculatedMd5ofParts != remoteMd5ofParts {
-		if err != nil {
-			return err
-		}
 		return fmt.Errorf("MD5 hash of part hashes comparison failed. Hash from multipart complete header: %s."+
 			" Calculated multipart hash: %s.", remoteMd5ofParts, calculatedMd5ofParts)
 	}
