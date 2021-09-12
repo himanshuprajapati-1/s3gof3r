@@ -35,7 +35,6 @@ const (
 )
 
 type part struct {
-	r io.ReadSeeker
 	b []byte
 
 	// Read by xml encoder
@@ -141,12 +140,11 @@ func (p *putter) flush() {
 	p.part++
 	p.putsz += int64(p.bufbytes)
 	part := &part{
-		r:          bytes.NewReader(p.buf[:p.bufbytes]),
 		b:          p.buf[:p.bufbytes],
 		PartNumber: p.part,
 	}
 	var err error
-	part.md5, part.sha256, part.ETag, err = p.hashContent(part.r)
+	part.md5, part.sha256, part.ETag, err = p.hashContent(part.b)
 	if err != nil {
 		p.err = err
 	}
@@ -195,10 +193,7 @@ func (p *putter) putPart(part *part) error {
 	v := url.Values{}
 	v.Set("partNumber", strconv.Itoa(part.PartNumber))
 	v.Set("uploadId", p.uploadID)
-	if _, err := part.r.Seek(0, 0); err != nil { // move back to beginning, if retrying
-		return err
-	}
-	req, err := http.NewRequest("PUT", p.url.String()+"?"+v.Encode(), part.r)
+	req, err := http.NewRequest("PUT", p.url.String()+"?"+v.Encode(), bytes.NewReader(part.b))
 	if err != nil {
 		return err
 	}
@@ -378,11 +373,11 @@ func (p *putter) abort() {
 }
 
 // Md5 functions
-func (p *putter) hashContent(r io.ReadSeeker) (string, string, string, error) {
+func (p *putter) hashContent(buf []byte) (string, string, string, error) {
 	m := md5.New()
 	s := sha256.New()
 	mw := io.MultiWriter(m, s, p.md5)
-	if _, err := io.Copy(mw, r); err != nil {
+	if _, err := io.Copy(mw, bytes.NewReader(buf)); err != nil {
 		return "", "", "", err
 	}
 	md5Sum := m.Sum(nil)
