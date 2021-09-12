@@ -67,11 +67,8 @@ type putter struct {
 
 	makes    int
 	uploadID string
-	xml      struct {
-		XMLName string `xml:"CompleteMultipartUpload"`
-		Part    []*part
-	}
-	putsz int64
+	parts    []*part
+	putsz    int64
 }
 
 // Sends an S3 multipart upload initiation request.
@@ -168,7 +165,7 @@ func (p *putter) addPart(buf []byte) (*part, error) {
 	var err error
 	part.md5, part.sha256, part.ETag, err = p.hashContent(part.b)
 
-	p.xml.Part = append(p.xml.Part, part)
+	p.parts = append(p.parts, part)
 
 	return part, err
 }
@@ -304,7 +301,13 @@ func (p *putter) Close() error {
 // * `true, err` if there was a retryable error;
 // * `false, err` if there was an unretryable error.
 func (p *putter) completeMultipartUpload() (bool, error) {
-	body, err := xml.Marshal(p.xml)
+	var parts struct {
+		XMLName string `xml:"CompleteMultipartUpload"`
+		Part    []*part
+	}
+	parts.Part = p.parts
+
+	body, err := xml.Marshal(parts)
 	if err != nil {
 		return false, err
 	}
