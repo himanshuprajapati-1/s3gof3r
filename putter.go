@@ -269,19 +269,10 @@ func (p *putter) Close() error {
 		}
 	}
 
-	// Check md5 hash of concatenated part md5 hashes against ETag
-	// more info: https://forums.aws.amazon.com/thread.jspa?messageID=456442&#456442
-	calculatedMd5ofParts := fmt.Sprintf("%x", p.md5OfParts.Sum(nil))
-	// Strip part count from end:
-	remoteMd5ofParts := p.eTag
-	remoteMd5ofParts = strings.Split(remoteMd5ofParts, "-")[0]
-	if len(remoteMd5ofParts) == 0 {
-		return fmt.Errorf("Nil ETag")
+	if err := p.checkMd5sOfParts(); err != nil {
+		return err
 	}
-	if calculatedMd5ofParts != remoteMd5ofParts {
-		return fmt.Errorf("MD5 hash of part hashes comparison failed. Hash from multipart complete header: %s."+
-			" Calculated multipart hash: %s.", remoteMd5ofParts, calculatedMd5ofParts)
-	}
+
 	if p.c.Md5Check {
 		for i := 0; i < p.c.NTry; i++ {
 			if err := p.putMd5(); err == nil {
@@ -289,6 +280,29 @@ func (p *putter) Close() error {
 			}
 		}
 	}
+	return nil
+}
+
+// checkMd5sOfParts checks the md5 hash of the concatenated part md5
+// hashes against the returned ETag. More info:
+// https://forums.aws.amazon.com/thread.jspa?messageID=456442&#456442
+func (p *putter) checkMd5sOfParts() error {
+	// Get the MD5 of the part checksums that we've been computing as
+	// parts were added:
+	calculatedMd5ofParts := fmt.Sprintf("%x", p.md5OfParts.Sum(nil))
+
+	// Find the comparable hash in the ETag returned from S3:
+	remoteMd5ofParts := p.eTag
+	remoteMd5ofParts = strings.Split(remoteMd5ofParts, "-")[0]
+	if len(remoteMd5ofParts) == 0 {
+		return fmt.Errorf("Nil ETag")
+	}
+
+	if calculatedMd5ofParts != remoteMd5ofParts {
+		return fmt.Errorf("MD5 hash of part hashes comparison failed. Hash from multipart complete header: %s."+
+			" Calculated multipart hash: %s.", remoteMd5ofParts, calculatedMd5ofParts)
+	}
+
 	return nil
 }
 
