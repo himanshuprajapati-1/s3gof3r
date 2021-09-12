@@ -62,7 +62,6 @@ type putter struct {
 	md5OfParts hash.Hash
 	md5        hash.Hash
 	ETag       string
-	Code       string
 
 	sp *pool.BufferPool
 
@@ -335,9 +334,12 @@ func (p *putter) completeMultipartUpload() (bool, error) {
 	// getting an Error, e.g. with InternalError under it. We should behave
 	// in that case as though we received a 500 and try again.
 
-	p.Code = ""
-	// Parse etag from body of response
-	err = xml.NewDecoder(resp.Body).Decode(p)
+	var r struct {
+		ETag string
+		Code string
+	}
+
+	err = xml.NewDecoder(resp.Body).Decode(&r)
 	closeErr := resp.Body.Close()
 	if err != nil {
 		// The decoder unfortunately returns string error
@@ -354,13 +356,15 @@ func (p *putter) completeMultipartUpload() (bool, error) {
 
 	// This is what S3 returns instead of a 500 when we should try
 	// to complete the multipart upload again
-	if p.Code == "InternalError" {
+	if r.Code == "InternalError" {
 		return true, errors.New("S3 internal error")
 	}
 	// Some other generic error
-	if p.Code != "" {
-		return false, fmt.Errorf("CompleteMultipartUpload error: %s", p.Code)
+	if r.Code != "" {
+		return false, fmt.Errorf("CompleteMultipartUpload error: %s", r.Code)
 	}
+
+	p.ETag = r.ETag
 
 	return false, nil
 }
