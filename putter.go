@@ -185,7 +185,7 @@ func (p *putter) retryPutPart(part *part) {
 	defer p.wg.Done()
 	var err error
 	for i := 0; i < p.c.NTry; i++ {
-		err = p.putPart(part)
+		err = p.uploadPart(part)
 		if err == nil {
 			// Give the buffer back to the pool, first making sure
 			// that its length is set to its full capacity:
@@ -201,7 +201,7 @@ func (p *putter) retryPutPart(part *part) {
 }
 
 // uploads a part, checking the etag against the calculated value
-func (p *putter) putPart(part *part) error {
+func (p *putter) uploadPart(part *part) error {
 	v := url.Values{}
 	v.Set("partNumber", strconv.Itoa(part.PartNumber))
 	v.Set("uploadId", p.uploadID)
