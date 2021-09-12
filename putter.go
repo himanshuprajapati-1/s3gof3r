@@ -64,7 +64,6 @@ type putter struct {
 
 	sp *pool.BufferPool
 
-	makes    int
 	uploadID string
 	parts    []*part
 	putsz    int64
