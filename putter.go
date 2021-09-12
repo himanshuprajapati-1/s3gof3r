@@ -258,16 +258,10 @@ func (p *putter) Close() error {
 		p.abort()
 		return p.err
 	}
-	// Complete Multipart upload
-	body, err := xml.Marshal(p.xml)
-	if err != nil {
-		p.abort()
-		return err
-	}
 
 	attemptsLeft := 5
 	for {
-		retryable, err := p.tryPut(body)
+		retryable, err := p.completeMultipartUpload()
 		if err == nil {
 			// Success!
 			break
@@ -295,7 +289,7 @@ func (p *putter) Close() error {
 	}
 	if p.c.Md5Check {
 		for i := 0; i < p.c.NTry; i++ {
-			if err = p.putMd5(); err == nil {
+			if err := p.putMd5(); err == nil {
 				break
 			}
 		}
@@ -303,12 +297,19 @@ func (p *putter) Close() error {
 	return nil
 }
 
-// tryPut makes one attempt at putting `body` via `p`. Return:
+// completeMultipartUpload makes one attempt at completing a multiline
+// upload out of the parts that have been uploaded already as part of
+// `p`. Return:
 //
 // * `false, nil` on success;
 // * `true, err` if there was a retryable error;
 // * `false, err` if there was an unretryable error.
-func (p *putter) tryPut(body []byte) (bool, error) {
+func (p *putter) completeMultipartUpload() (bool, error) {
+	body, err := xml.Marshal(p.xml)
+	if err != nil {
+		return false, err
+	}
+
 	b := bytes.NewReader(body)
 	v := url.Values{}
 	v.Set("uploadId", p.uploadID)
