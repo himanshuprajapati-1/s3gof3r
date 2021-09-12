@@ -35,9 +35,8 @@ const (
 )
 
 type part struct {
-	r   io.ReadSeeker
-	len int64
-	b   []byte
+	r io.ReadSeeker
+	b []byte
 
 	// Read by xml encoder
 	PartNumber int
@@ -143,8 +142,7 @@ func (p *putter) flush() {
 	p.putsz += int64(p.bufbytes)
 	part := &part{
 		r:          bytes.NewReader(p.buf[:p.bufbytes]),
-		len:        int64(p.bufbytes),
-		b:          p.buf,
+		b:          p.buf[:p.bufbytes],
 		PartNumber: p.part,
 	}
 	var err error
@@ -179,8 +177,11 @@ func (p *putter) retryPutPart(part *part) {
 	for i := 0; i < p.c.NTry; i++ {
 		err = p.putPart(part)
 		if err == nil {
-			p.sp.Put(part.b)
+			// Give the buffer back to the pool, first making sure
+			// that its length is set to its full capacity:
+			p.sp.Put(part.b[:cap(part.b)])
 			part.b = nil
+
 			return
 		}
 		logger.debugPrintf("Error on attempt %d: Retrying part: %d, Error: %s", i, part.PartNumber, err)
@@ -201,7 +202,7 @@ func (p *putter) putPart(part *part) error {
 	if err != nil {
 		return err
 	}
-	req.ContentLength = part.len
+	req.ContentLength = int64(len(part.b))
 	req.Header.Set(md5Header, part.md5)
 	req.Header.Set(sha256Header, part.sha256)
 	p.b.Sign(req)
