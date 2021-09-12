@@ -38,8 +38,8 @@ type part struct {
 	b []byte
 
 	// Read by xml encoder
-	PartNumber int
-	ETag       string
+	partNumber int
+	eTag       string
 
 	// Checksums
 	md5    string
@@ -160,10 +160,10 @@ func (p *putter) addPart(buf []byte) (*part, error) {
 	p.putsz += int64(len(buf))
 	part := &part{
 		b:          buf,
-		PartNumber: p.part,
+		partNumber: p.part,
 	}
 	var err error
-	part.md5, part.sha256, part.ETag, err = p.hashContent(part.b)
+	part.md5, part.sha256, part.eTag, err = p.hashContent(part.b)
 
 	p.parts = append(p.parts, part)
 
@@ -190,7 +190,7 @@ func (p *putter) retryPutPart(part *part) {
 
 			return
 		}
-		logger.debugPrintf("Error on attempt %d: Retrying part: %d, Error: %s", i, part.PartNumber, err)
+		logger.debugPrintf("Error on attempt %d: Retrying part: %d, Error: %s", i, part.partNumber, err)
 		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
 	}
 	p.err = err
@@ -199,7 +199,7 @@ func (p *putter) retryPutPart(part *part) {
 // uploads a part, checking the etag against the calculated value
 func (p *putter) uploadPart(part *part) error {
 	v := url.Values{}
-	v.Set("partNumber", strconv.Itoa(part.PartNumber))
+	v.Set("partNumber", strconv.Itoa(part.partNumber))
 	v.Set("uploadId", p.uploadID)
 	req, err := http.NewRequest("PUT", p.url.String()+"?"+v.Encode(), bytes.NewReader(part.b))
 	if err != nil {
@@ -225,7 +225,7 @@ func (p *putter) uploadPart(part *part) error {
 		return fmt.Errorf("Got Bad etag:%s", s)
 	}
 	s = s[1 : len(s)-1] // includes quote chars for some reason
-	if part.ETag != s {
+	if part.eTag != s {
 		return fmt.Errorf("Response etag does not match. Remote:%s Calculated:%s", s, p.eTag)
 	}
 	return nil
@@ -301,13 +301,24 @@ func (p *putter) Close() error {
 // * `true, err` if there was a retryable error;
 // * `false, err` if there was an unretryable error.
 func (p *putter) completeMultipartUpload() (bool, error) {
-	var parts struct {
-		XMLName string `xml:"CompleteMultipartUpload"`
-		Part    []*part
+	type xmlPart struct {
+		PartNumber int
+		ETag       string
 	}
-	parts.Part = p.parts
 
-	body, err := xml.Marshal(parts)
+	var xmlParts struct {
+		XMLName string `xml:"CompleteMultipartUpload"`
+		Part    []xmlPart
+	}
+	xmlParts.Part = make([]xmlPart, len(p.parts))
+	for i, part := range p.parts {
+		xmlParts.Part[i] = xmlPart{
+			PartNumber: part.partNumber,
+			ETag:       part.eTag,
+		}
+	}
+
+	body, err := xml.Marshal(xmlParts)
 	if err != nil {
 		return false, err
 	}
