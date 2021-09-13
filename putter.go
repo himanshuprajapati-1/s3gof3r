@@ -28,11 +28,19 @@ const (
 	maxNPart    = 10000
 )
 
+type s3Putter interface {
+	StartMultipartUpload(h http.Header) (string, error)
+	UploadPart(uploadID string, part *s3client.Part) error
+	CompleteMultipartUpload(uploadID string, parts []*s3client.Part) (string, error)
+	AbortMultipartUpload(uploadID string) error
+	PutMD5(url *url.URL, md5 string) error
+}
+
 type putter struct {
 	url    url.URL
 	b      *Bucket
 	c      *Config
-	client *s3client.Client
+	client s3Putter
 
 	bufsz      int64
 	buf        []byte
