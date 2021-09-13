@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -182,7 +181,7 @@ func (p *putter) retryPutPart(part *part) {
 	defer p.wg.Done()
 	var err error
 	for i := 0; i < p.c.NTry; i++ {
-		err = p.uploadPart(part)
+		err = p.client.UploadPart(p.uploadID, part)
 		if err == nil {
 			// Give the buffer back to the pool, first making sure
 			// that its length is set to its full capacity:
@@ -195,41 +194,6 @@ func (p *putter) retryPutPart(part *part) {
 		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
 	}
 	p.err = err
-}
-
-// uploads a part, checking the etag against the calculated value
-func (p *putter) uploadPart(part *part) error {
-	v := url.Values{}
-	v.Set("partNumber", strconv.Itoa(part.partNumber))
-	v.Set("uploadId", p.uploadID)
-	req, err := http.NewRequest("PUT", p.url.String()+"?"+v.Encode(), bytes.NewReader(part.b))
-	if err != nil {
-		return err
-	}
-	req.ContentLength = int64(len(part.b))
-	req.Header.Set(md5Header, part.md5)
-	req.Header.Set(sha256Header, part.sha256)
-	p.b.Sign(req)
-	resp, err := p.c.Client.Do(req)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != 200 {
-		return newRespError(resp)
-	}
-	if err := resp.Body.Close(); err != nil {
-		return err
-	}
-
-	s := resp.Header.Get("etag")
-	if len(s) < 2 {
-		return fmt.Errorf("Got Bad etag:%s", s)
-	}
-	s = s[1 : len(s)-1] // includes quote chars for some reason
-	if part.eTag != s {
-		return fmt.Errorf("Response etag does not match. Remote:%s Calculated:%s", s, p.eTag)
-	}
-	return nil
 }
 
 func (p *putter) Close() error {
