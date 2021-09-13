@@ -218,6 +218,24 @@ func (c *client) completeMultipartUpload(uploadID string, parts []*part) (string
 	return strings.Trim(r.ETag, "\""), false, nil
 }
 
+// AbortMultipartUpload aborts a multipart upload, discarding any
+// partly-uploaded contents.
+func (c *client) AbortMultipartUpload(uploadID string) error {
+	v := url.Values{}
+	v.Set("uploadId", uploadID)
+	s := c.url.String() + "?" + v.Encode()
+	resp, err := c.retryRequest("DELETE", s, nil, nil)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != 204 {
+		return newRespError(resp)
+	}
+	_ = resp.Body.Close()
+
+	return nil
+}
+
 var err500 = errors.New("received 500 from server")
 
 func (c *client) retryRequest(
