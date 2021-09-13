@@ -114,6 +114,25 @@ func (c *client) uploadPartAttempt(uploadID string, part *part) error {
 	return nil
 }
 
+// CompleteMultipartUpload completes a multiline upload, using
+// `parts`, which have been uploaded already. Retry on errors. On
+// success, return the etag that was returned by S3.
+func (c *client) CompleteMultipartUpload(uploadID string, parts []*part) (string, error) {
+	attemptsLeft := 5
+	for {
+		eTag, retryable, err := c.completeMultipartUpload(uploadID, parts)
+		if err == nil {
+			// Success!
+			return eTag, nil
+		}
+
+		attemptsLeft--
+		if !retryable || attemptsLeft == 0 {
+			return "", err
+		}
+	}
+}
+
 // completeMultipartUpload makes one attempt at completing a multiline
 // upload, using `parts`, which have been uploaded already. Return:
 //

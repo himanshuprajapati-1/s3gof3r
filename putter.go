@@ -213,21 +213,12 @@ func (p *putter) Close() error {
 		return p.err
 	}
 
-	attemptsLeft := 5
-	for {
-		eTag, retryable, err := p.client.completeMultipartUpload(p.uploadID, p.parts)
-		if err == nil {
-			// Success!
-			p.eTag = eTag
-			break
-		}
-
-		attemptsLeft--
-		if !retryable || attemptsLeft == 0 {
-			p.abort()
-			return err
-		}
+	eTag, err := p.client.CompleteMultipartUpload(p.uploadID, p.parts)
+	if err != nil {
+		p.abort()
+		return err
 	}
+	p.eTag = eTag
 
 	if err := p.checkMd5sOfParts(); err != nil {
 		return err
