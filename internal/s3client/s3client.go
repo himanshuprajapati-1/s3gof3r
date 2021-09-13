@@ -322,6 +322,7 @@ func (c *Client) retryRequest(
 		c.signer.Sign(req)
 		resp, err := c.httpClient.Do(req)
 		if err == nil && resp.StatusCode == 500 {
+			_ = resp.Body.Close()
 			err = err500
 			// Exponential back-off:
 			time.Sleep(time.Duration(math.Exp2(float64(attempt))) * 100 * time.Millisecond)
