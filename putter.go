@@ -223,8 +223,16 @@ func (p *putter) Close() error {
 	}
 
 	if p.c.Md5Check {
+		md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
+		md5URL, err := p.b.url(md5Path, p.c)
+		if err != nil {
+			return err
+		}
+		sum := fmt.Sprintf("%x", p.md5.Sum(nil))
+		logger.debugPrintln("md5: ", sum)
+		logger.debugPrintln("md5Path: ", md5Path)
 		for i := 0; i < p.c.NTry; i++ {
-			if err := p.putMd5(); err == nil {
+			if err := p.client.putMD5(md5URL, sum); err == nil {
 				break
 			}
 		}
@@ -279,38 +287,6 @@ func (p *putter) hashContent(buf []byte) (string, string, string, error) {
 		return "", "", "", err
 	}
 	return base64.StdEncoding.EncodeToString(md5Sum), shaSum, etag, nil
-}
-
-// Put md5 file in .md5 subdirectory of bucket  where the file is stored
-// e.g. the md5 for https://mybucket.s3.amazonaws.com/gof3r will be stored in
-// https://mybucket.s3.amazonaws.com/.md5/gof3r.md5
-func (p *putter) putMd5() error {
-	calcMd5 := fmt.Sprintf("%x", p.md5.Sum(nil))
-	md5Reader := strings.NewReader(calcMd5)
-	md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
-	md5Url, err := p.b.url(md5Path, p.c)
-	if err != nil {
-		return err
-	}
-	logger.debugPrintln("md5: ", calcMd5)
-	logger.debugPrintln("md5Path: ", md5Path)
-	r, err := http.NewRequest("PUT", md5Url.String(), md5Reader)
-	if err != nil {
-		return err
-	}
-	p.b.Sign(r)
-	resp, err := p.c.Client.Do(r)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != 200 {
-		return newRespError(resp)
-	}
-	if err := resp.Body.Close(); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // returns true unless partSize is large enough

@@ -236,6 +236,36 @@ func (c *client) AbortMultipartUpload(uploadID string) error {
 	return nil
 }
 
+// PutMD5 writes an md5 file in a ".md5" subdirectory of the directory
+// where the blob is stored; e.g., the md5 for blob
+// https://mybucket.s3.amazonaws.com/gof3r will be stored in
+// https://mybucket.s3.amazonaws.com/.md5/gof3r.md5.
+// putMD5 makes one attempt to write an md5 file in a ".md5"
+// subdirectory of the directory where the blob is stored; e.g., the
+// md5 for blob https://mybucket.s3.amazonaws.com/gof3r will be stored
+// in https://mybucket.s3.amazonaws.com/.md5/gof3r.md5.
+func (c *client) putMD5(url *url.URL, md5 string) error {
+	md5Reader := strings.NewReader(md5)
+
+	r, err := http.NewRequest("PUT", url.String(), md5Reader)
+	if err != nil {
+		return err
+	}
+	c.bucket.Sign(r)
+	resp, err := c.httpClient.Do(r)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != 200 {
+		return newRespError(resp)
+	}
+	if err := resp.Body.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 var err500 = errors.New("received 500 from server")
 
 func (c *client) retryRequest(
