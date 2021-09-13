@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/xml"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -217,9 +215,10 @@ func (p *putter) Close() error {
 
 	attemptsLeft := 5
 	for {
-		retryable, err := p.completeMultipartUpload()
+		eTag, retryable, err := p.client.completeMultipartUpload(p.uploadID, p.parts)
 		if err == nil {
 			// Success!
+			p.eTag = eTag
 			break
 		}
 
@@ -265,96 +264,6 @@ func (p *putter) checkMd5sOfParts() error {
 	}
 
 	return nil
-}
-
-// completeMultipartUpload makes one attempt at completing a multiline
-// upload out of the parts that have been uploaded already as part of
-// `p`. Return:
-//
-// * `false, nil` on success;
-// * `true, err` if there was a retryable error;
-// * `false, err` if there was an unretryable error.
-func (p *putter) completeMultipartUpload() (bool, error) {
-	type xmlPart struct {
-		PartNumber int
-		ETag       string
-	}
-
-	var xmlParts struct {
-		XMLName string `xml:"CompleteMultipartUpload"`
-		Part    []xmlPart
-	}
-	xmlParts.Part = make([]xmlPart, len(p.parts))
-	for i, part := range p.parts {
-		xmlParts.Part[i] = xmlPart{
-			PartNumber: part.partNumber,
-			ETag:       part.eTag,
-		}
-	}
-
-	body, err := xml.Marshal(xmlParts)
-	if err != nil {
-		return false, err
-	}
-
-	b := bytes.NewReader(body)
-	v := url.Values{}
-	v.Set("uploadId", p.uploadID)
-
-	resp, err := p.retryRequest("POST", p.url.String()+"?"+v.Encode(), b, nil)
-	if err != nil {
-		// If the connection got closed (firwall, proxy, etc.)
-		// we should also retry, just like if we'd had a 500.
-		if err == io.ErrUnexpectedEOF {
-			return true, err
-		}
-
-		p.abort()
-		return false, err
-	}
-	if resp.StatusCode != 200 {
-		p.abort()
-		return false, newRespError(resp)
-	}
-
-	// S3 will return an error under a 200 as well. Instead of the
-	// CompleteMultipartUploadResult that we expect below, we might be
-	// getting an Error, e.g. with InternalError under it. We should behave
-	// in that case as though we received a 500 and try again.
-
-	var r struct {
-		ETag string
-		Code string
-	}
-
-	err = xml.NewDecoder(resp.Body).Decode(&r)
-	closeErr := resp.Body.Close()
-	if err != nil {
-		// The decoder unfortunately returns string error
-		// instead of specific errors.
-		if err.Error() == "unexpected EOF" {
-			return true, err
-		}
-
-		return false, err
-	}
-	if closeErr != nil {
-		return true, closeErr
-	}
-
-	// This is what S3 returns instead of a 500 when we should try
-	// to complete the multipart upload again
-	if r.Code == "InternalError" {
-		return true, errors.New("S3 internal error")
-	}
-	// Some other generic error
-	if r.Code != "" {
-		return false, fmt.Errorf("CompleteMultipartUpload error: %s", r.Code)
-	}
-
-	p.eTag = strings.Trim(r.ETag, "\"")
-
-	return false, nil
 }
 
 // Try to abort multipart upload. Do not error on failure.

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -111,6 +112,91 @@ func (c *client) uploadPartAttempt(uploadID string, part *part) error {
 		return fmt.Errorf("Response etag does not match. Remote:%s Calculated:%s", s, part.eTag)
 	}
 	return nil
+}
+
+// completeMultipartUpload makes one attempt at completing a multiline
+// upload, using `parts`, which have been uploaded already. Return:
+//
+// * `eTag, false, nil` on success;
+// * `"", true, err` if there was a retryable error;
+// * `"", false, err` if there was an unretryable error.
+func (c *client) completeMultipartUpload(uploadID string, parts []*part) (string, bool, error) {
+	type xmlPart struct {
+		PartNumber int
+		ETag       string
+	}
+
+	var xmlParts struct {
+		XMLName string `xml:"CompleteMultipartUpload"`
+		Part    []xmlPart
+	}
+	xmlParts.Part = make([]xmlPart, len(parts))
+	for i, part := range parts {
+		xmlParts.Part[i] = xmlPart{
+			PartNumber: part.partNumber,
+			ETag:       part.eTag,
+		}
+	}
+
+	body, err := xml.Marshal(xmlParts)
+	if err != nil {
+		return "", false, err
+	}
+
+	b := bytes.NewReader(body)
+	v := url.Values{}
+	v.Set("uploadId", uploadID)
+
+	resp, err := c.retryRequest("POST", c.url.String()+"?"+v.Encode(), b, nil)
+	if err != nil {
+		// If the connection got closed (firwall, proxy, etc.)
+		// we should also retry, just like if we'd had a 500.
+		if err == io.ErrUnexpectedEOF {
+			return "", true, err
+		}
+
+		return "", false, err
+	}
+	if resp.StatusCode != 200 {
+		return "", false, newRespError(resp)
+	}
+
+	// S3 will return an error under a 200 as well. Instead of the
+	// CompleteMultipartUploadResult that we expect below, we might be
+	// getting an Error, e.g. with InternalError under it. We should behave
+	// in that case as though we received a 500 and try again.
+
+	var r struct {
+		ETag string
+		Code string
+	}
+
+	err = xml.NewDecoder(resp.Body).Decode(&r)
+	closeErr := resp.Body.Close()
+	if err != nil {
+		// The decoder unfortunately returns string error
+		// instead of specific errors.
+		if err.Error() == "unexpected EOF" {
+			return "", true, err
+		}
+
+		return "", false, err
+	}
+	if closeErr != nil {
+		return "", true, closeErr
+	}
+
+	// This is what S3 returns instead of a 500 when we should try
+	// to complete the multipart upload again
+	if r.Code == "InternalError" {
+		return "", true, errors.New("S3 internal error")
+	}
+	// Some other generic error
+	if r.Code != "" {
+		return "", false, fmt.Errorf("CompleteMultipartUpload error: %s", r.Code)
+	}
+
+	return strings.Trim(r.ETag, "\""), false, nil
 }
 
 var err500 = errors.New("received 500 from server")
