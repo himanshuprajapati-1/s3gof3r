@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/github/s3gof3r/internal/s3client"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -250,7 +251,7 @@ func listObjects(c *Config, b *Bucket, opts listObjectsOptions) (*listBucketResu
 		return nil, err
 	}
 	if resp.StatusCode != 200 {
-		return nil, newRespError(resp)
+		return nil, s3client.NewRespError(resp)
 	}
 
 	err = xml.NewDecoder(resp.Body).Decode(result)

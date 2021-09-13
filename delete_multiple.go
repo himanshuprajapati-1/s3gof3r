@@ -7,6 +7,8 @@ import (
 	"encoding/xml"
 	"io/ioutil"
 	"net/http"
+
+	"github.com/github/s3gof3r/internal/s3client"
 )
 
 type deleteObject struct {
@@ -73,7 +75,7 @@ func deleteMultiple(c *Config, b *Bucket, quiet bool, keys []string) (DeleteResu
 		ContentLength: int64(len(body)),
 		Header:        make(http.Header),
 	}
-	r.Header.Set(md5Header, base64.StdEncoding.EncodeToString(md5sum[:]))
+	r.Header.Set(s3client.MD5Header, base64.StdEncoding.EncodeToString(md5sum[:]))
 	b.Sign(&r)
 
 	resp, err := b.conf().Do(&r)
@@ -81,7 +83,7 @@ func deleteMultiple(c *Config, b *Bucket, quiet bool, keys []string) (DeleteResu
 		return DeleteResult{}, err
 	}
 	if resp.StatusCode != 200 {
-		return DeleteResult{}, newRespError(resp)
+		return DeleteResult{}, s3client.NewRespError(resp)
 	}
 
 	var result DeleteResult

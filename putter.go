@@ -17,40 +17,27 @@ import (
 	"syscall"
 
 	"github.com/github/s3gof3r/internal/pool"
+	"github.com/github/s3gof3r/internal/s3client"
 )
 
 // defined by amazon
 const (
-	minPartSize  = 5 * mb
-	maxPartSize  = 5 * gb
-	maxObjSize   = 5 * tb
-	maxNPart     = 10000
-	md5Header    = "content-md5"
-	sha256Header = "X-Amz-Content-Sha256"
+	minPartSize = 5 * mb
+	maxPartSize = 5 * gb
+	maxObjSize  = 5 * tb
+	maxNPart    = 10000
 )
-
-type part struct {
-	b []byte
-
-	// Read by xml encoder
-	partNumber int
-	eTag       string
-
-	// Checksums
-	md5    string
-	sha256 string
-}
 
 type putter struct {
 	url    url.URL
 	b      *Bucket
 	c      *Config
-	client *client
+	client *s3client.Client
 
 	bufsz      int64
 	buf        []byte
 	bufbytes   int // bytes written to current buffer
-	ch         chan *part
+	ch         chan *s3client.Part
 	closed     bool
 	err        error
 	wg         sync.WaitGroup
@@ -61,7 +48,7 @@ type putter struct {
 	sp *pool.BufferPool
 
 	uploadID string
-	parts    []*part
+	parts    []*s3client.Part
 	putsz    int64
 }
 
@@ -78,7 +65,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	p.c.NTry = max(c.NTry, 1)
 	p.bufsz = max64(minPartSize, c.PartSize)
 
-	p.client = newClient(url, p.b, p.c.Client, p.c.NTry)
+	p.client = s3client.New(url, p.b, p.c.Client, p.c.NTry, bufferPoolLogger{})
 
 	var err error
 	p.uploadID, err = p.client.StartMultipartUpload(h)
@@ -86,7 +73,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 		return nil, err
 	}
 
-	p.ch = make(chan *part)
+	p.ch = make(chan *s3client.Part)
 	for i := 0; i < p.c.Concurrency; i++ {
 		go p.worker()
 	}
@@ -152,14 +139,14 @@ func (p *putter) flush() {
 // `p.md5`, adds it to `p.xml.Part`, and returns it. It does not do
 // anything to cause the part to get uploaded. FIXME: the part is
 // returned even if there is an error hashing the data.
-func (p *putter) addPart(buf []byte) (*part, error) {
+func (p *putter) addPart(buf []byte) (*s3client.Part, error) {
 	p.putsz += int64(len(buf))
-	part := &part{
-		b:          buf,
-		partNumber: len(p.parts) + 1,
+	part := &s3client.Part{
+		Data:       buf,
+		PartNumber: len(p.parts) + 1,
 	}
 	var err error
-	part.md5, part.sha256, part.eTag, err = p.hashContent(part.b)
+	part.MD5, part.SHA256, part.ETag, err = p.hashContent(part.Data)
 
 	p.parts = append(p.parts, part)
 
@@ -173,7 +160,7 @@ func (p *putter) worker() {
 }
 
 // Upload `part` to S3 and handle errors.
-func (p *putter) retryPutPart(part *part) {
+func (p *putter) retryPutPart(part *s3client.Part) {
 	defer p.wg.Done()
 	err := p.client.UploadPart(p.uploadID, part)
 	if err != nil {
@@ -183,8 +170,8 @@ func (p *putter) retryPutPart(part *part) {
 
 	// Give the buffer back to the pool, first making sure
 	// that its length is set to its full capacity:
-	p.sp.Put(part.b[:cap(part.b)])
-	part.b = nil
+	p.sp.Put(part.Data[:cap(part.Data)])
+	part.Data = nil
 }
 
 func (p *putter) Close() error {

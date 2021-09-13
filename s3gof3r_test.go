@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/github/s3gof3r/internal/s3client"
 )
 
 var b *tB
@@ -60,7 +62,7 @@ var getTests = []struct {
 }{
 	{"t1.test", nil, 1 * kb, nil},
 	{"no-md5", &Config{Scheme: "https", Client: ClientWithTimeout(clientTimeout), Md5Check: false}, 1, nil},
-	{"NoKey", nil, -1, &RespError{StatusCode: 404, Message: "The specified key does not exist."}},
+	{"NoKey", nil, -1, &s3client.RespError{StatusCode: 404, Message: "The specified key does not exist."}},
 	{"", nil, -1, fmt.Errorf("empty path requested")},
 	{"1_mb_test",
 		&Config{Concurrency: 2, PartSize: 5 * mb, NTry: 2, Md5Check: true, Scheme: "https", Client: ClientWithTimeout(2 * time.Second)},
@@ -108,11 +110,11 @@ func TestPutWriter(t *testing.T) {
 	}{
 		{"testfile", []byte("test_data"), nil, nil, 9, nil},
 		{"", []byte("test_data"), nil, nil,
-			9, &RespError{StatusCode: 400, Message: "A key must be specified"}},
+			9, &s3client.RespError{StatusCode: 400, Message: "A key must be specified"}},
 		{"test0byte", []byte(""), nil, nil, 0, nil},
 		{"testhg", []byte("foo"), goodHeader(), nil, 3, nil},
 		{"testhb", []byte("foo"), badHeader(), nil, 3,
-			&RespError{StatusCode: 400, Message: "The encryption method specified is not supported"}},
+			&s3client.RespError{StatusCode: 400, Message: "The encryption method specified is not supported"}},
 		{"nomd5", []byte("foo"), goodHeader(),
 			&Config{Concurrency: 1, PartSize: 5 * mb, NTry: 1, Md5Check: false, Scheme: "http", Client: http.DefaultClient}, 3, nil},
 		{"noconc", []byte("foo"), nil,

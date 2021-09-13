@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/github/s3gof3r/internal/s3client"
 )
 
 const versionParam = "versionId"
@@ -220,7 +222,7 @@ func (b *Bucket) delete(path string) error {
 		return err
 	}
 	if resp.StatusCode != 204 {
-		return newRespError(resp)
+		return s3client.NewRespError(resp)
 	}
 	if err := resp.Body.Close(); err != nil {
 		return err
