@@ -176,24 +176,19 @@ func (p *putter) worker() {
 	}
 }
 
-// Calls putPart up to nTry times to recover from transient errors.
+// Upload `part` to S3 and handle errors.
 func (p *putter) retryPutPart(part *part) {
 	defer p.wg.Done()
-	var err error
-	for i := 0; i < p.c.NTry; i++ {
-		err = p.client.UploadPart(p.uploadID, part)
-		if err == nil {
-			// Give the buffer back to the pool, first making sure
-			// that its length is set to its full capacity:
-			p.sp.Put(part.b[:cap(part.b)])
-			part.b = nil
-
-			return
-		}
-		logger.debugPrintf("Error on attempt %d: Retrying part: %d, Error: %s", i, part.partNumber, err)
-		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
+	err := p.client.UploadPart(p.uploadID, part)
+	if err != nil {
+		p.err = err
+		return
 	}
-	p.err = err
+
+	// Give the buffer back to the pool, first making sure
+	// that its length is set to its full capacity:
+	p.sp.Put(part.b[:cap(part.b)])
+	part.b = nil
 }
 
 func (p *putter) Close() error {

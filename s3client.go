@@ -59,8 +59,27 @@ func (c *client) StartMultipartUpload(h http.Header) (string, error) {
 }
 
 // UploadPart uploads a part of a multipart upload, checking the etag
-// returned by S3 against the calculated value.
+// returned by S3 against the calculated value, including retries.
 func (c *client) UploadPart(uploadID string, part *part) error {
+	var err error
+	for i := 0; i < c.nTry; i++ {
+		err = c.uploadPartAttempt(uploadID, part)
+		if err == nil {
+			return nil
+		}
+		logger.debugPrintf(
+			"Error on attempt %d: Retrying part: %d, Error: %s", i, part.partNumber, err,
+		)
+		// Exponential back-off:
+		time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond)
+	}
+	return err
+}
+
+// uploadPartAttempt makes one attempt to upload a part of a multipart
+// upload, checking the etag returned by S3 against the calculated
+// value.
+func (c *client) uploadPartAttempt(uploadID string, part *part) error {
 	v := url.Values{}
 	v.Set("partNumber", strconv.Itoa(part.partNumber))
 	v.Set("uploadId", uploadID)
