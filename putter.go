@@ -47,9 +47,10 @@ type part struct {
 }
 
 type putter struct {
-	url url.URL
-	b   *Bucket
-	c   *Config
+	url    url.URL
+	b      *Bucket
+	c      *Config
+	client *client
 
 	bufsz      int64
 	buf        []byte
@@ -82,8 +83,10 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	p.c.NTry = max(c.NTry, 1)
 	p.bufsz = max64(minPartSize, c.PartSize)
 
+	p.client = newClient(url, p.b, p.c.Client, p.c.NTry)
+
 	var err error
-	p.uploadID, err = p.startMultipartUpload(h)
+	p.uploadID, err = p.client.StartMultipartUpload(h)
 	if err != nil {
 		return nil, err
 	}
@@ -470,32 +473,6 @@ func (p *putter) putMd5() error {
 
 	return nil
 }
-
-func (p *putter) startMultipartUpload(h http.Header) (string, error) {
-	resp, err := p.retryRequest("POST", p.url.String()+"?uploads", nil, h)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != 200 {
-		return "", newRespError(resp)
-	}
-
-	var r struct {
-		UploadID string `xml:"UploadId"`
-	}
-
-	err = xml.NewDecoder(resp.Body).Decode(&r)
-	closeErr := resp.Body.Close()
-	if err != nil {
-		return "", err
-	}
-	if closeErr != nil {
-		return r.UploadID, closeErr
-	}
-	return r.UploadID, nil
-}
-
-var err500 = errors.New("received 500 from server")
 
 func (p *putter) retryRequest(method, urlStr string, body io.ReadSeeker, h http.Header) (resp *http.Response, err error) {
 	for i := 0; i < p.c.NTry; i++ {
