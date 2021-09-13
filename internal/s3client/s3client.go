@@ -302,12 +302,12 @@ var err500 = errors.New("received 500 from server")
 
 func (c *Client) retryRequest(
 	method, urlStr string, body io.ReadSeeker, h http.Header,
-) (resp *http.Response, err error) {
-	for i := 0; i < c.nTry; i++ {
-		var req *http.Request
-		req, err = http.NewRequest(method, urlStr, body)
+) (*http.Response, error) {
+	attempt := 0
+	for {
+		req, err := http.NewRequest(method, urlStr, body)
 		if err != nil {
-			return
+			return nil, err
 		}
 		for k := range h {
 			for _, v := range h[k] {
@@ -320,22 +320,32 @@ func (c *Client) retryRequest(
 		}
 
 		c.signer.Sign(req)
-		resp, err = c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err == nil && resp.StatusCode == 500 {
 			err = err500
-			time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
+			// Exponential back-off:
+			time.Sleep(time.Duration(math.Exp2(float64(attempt))) * 100 * time.Millisecond)
 		}
 		if err == nil {
-			return
+			// Success!
+			return resp, nil
 		}
+
 		c.logger.Printf("%v", err)
+
+		attempt++
+		if attempt >= c.nTry {
+			return nil, err
+		}
+
+		// Rewind the body so that it can be replayed for the next
+		// attempt:
 		if body != nil {
 			if _, err = body.Seek(0, 0); err != nil {
-				return
+				return nil, err
 			}
 		}
 	}
-	return
 }
 
 type signer interface {
