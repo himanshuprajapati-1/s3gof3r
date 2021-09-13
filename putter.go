@@ -231,11 +231,8 @@ func (p *putter) Close() error {
 		sum := fmt.Sprintf("%x", p.md5.Sum(nil))
 		logger.debugPrintln("md5: ", sum)
 		logger.debugPrintln("md5Path: ", md5Path)
-		for i := 0; i < p.c.NTry; i++ {
-			if err := p.client.putMD5(md5URL, sum); err == nil {
-				break
-			}
-		}
+		// FIXME: should this error really be ignored?
+		_ = p.client.PutMD5(md5URL, sum)
 	}
 	return nil
 }

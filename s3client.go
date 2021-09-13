@@ -236,10 +236,21 @@ func (c *client) AbortMultipartUpload(uploadID string) error {
 	return nil
 }
 
-// PutMD5 writes an md5 file in a ".md5" subdirectory of the directory
-// where the blob is stored; e.g., the md5 for blob
-// https://mybucket.s3.amazonaws.com/gof3r will be stored in
-// https://mybucket.s3.amazonaws.com/.md5/gof3r.md5.
+// PutMD5 attempts to write an md5 file in a ".md5" subdirectory of
+// the directory where the blob is stored, with retries. For example,
+// the md5 for blob https://mybucket.s3.amazonaws.com/gof3r will be
+// stored in https://mybucket.s3.amazonaws.com/.md5/gof3r.md5.
+func (c *client) PutMD5(url *url.URL, md5 string) error {
+	var err error
+	for i := 0; i < c.nTry; i++ {
+		err = c.putMD5(url, md5)
+		if err == nil {
+			break
+		}
+	}
+	return err
+}
+
 // putMD5 makes one attempt to write an md5 file in a ".md5"
 // subdirectory of the directory where the blob is stored; e.g., the
 // md5 for blob https://mybucket.s3.amazonaws.com/gof3r will be stored
