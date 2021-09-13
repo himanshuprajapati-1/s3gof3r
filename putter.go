@@ -9,14 +9,12 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/github/s3gof3r/internal/pool"
 )
@@ -313,42 +311,6 @@ func (p *putter) putMd5() error {
 	}
 
 	return nil
-}
-
-func (p *putter) retryRequest(method, urlStr string, body io.ReadSeeker, h http.Header) (resp *http.Response, err error) {
-	for i := 0; i < p.c.NTry; i++ {
-		var req *http.Request
-		req, err = http.NewRequest(method, urlStr, body)
-		if err != nil {
-			return
-		}
-		for k := range h {
-			for _, v := range h[k] {
-				req.Header.Add(k, v)
-			}
-		}
-
-		if body != nil {
-			req.Header.Set(sha256Header, shaReader(body))
-		}
-
-		p.b.Sign(req)
-		resp, err = p.c.Client.Do(req)
-		if err == nil && resp.StatusCode == 500 {
-			err = err500
-			time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
-		}
-		if err == nil {
-			return
-		}
-		logger.debugPrintln(err)
-		if body != nil {
-			if _, err = body.Seek(0, 0); err != nil {
-				return
-			}
-		}
-	}
-	return
 }
 
 // returns true unless partSize is large enough
