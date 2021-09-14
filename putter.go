@@ -49,7 +49,7 @@ type s3Putter interface {
 //                                                                    > | worker() | --> | S3 |
 //            p.pw.Write()      pr.Read()             send           /  +----------+     +----+
 //     +--------+     +---------+     +--------------+     +------+ /   +----------+     +----+
-//     | caller | --> | io.Pipe | --> | queueParts() | --> | p.ch | --> | worker() | --> | S3 |
+//     | caller | --> | io.Pipe | --> | queueParts() | --> |  ch  | --> | worker() | --> | S3 |
 //     +--------+     +---------+     +--------------+     +------+ \   +----------+     +----+
 //                                          |                        \  +----------+     +----+
 //                                          |                         > | worker() | --> | S3 |
@@ -95,7 +95,6 @@ type putter struct {
 	pw *io.PipeWriter
 
 	bufsz      int64
-	ch         chan *s3client.Part
 	closeOnce  sync.Once
 	eg         *errgroup.Group
 	md5OfParts hash.Hash
@@ -128,7 +127,6 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 		c:          &cCopy,
 		b:          &bCopy,
 		bufsz:      bufsz,
-		ch:         make(chan *s3client.Part),
 		eg:         eg,
 		md5OfParts: md5.New(),
 		md5:        md5.New(),
@@ -147,10 +145,12 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	pr, pw := io.Pipe()
 	p.pw = pw
 
+	ch := make(chan *s3client.Part)
+
 	p.eg.Go(func() error {
-		err = p.queueParts(ctx, pr)
+		err = p.queueParts(ctx, pr, ch)
 		p.closeOnce.Do(func() { pr.Close() })
-		close(p.ch)
+		close(ch)
 		return err
 	})
 
@@ -166,7 +166,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	}()
 
 	for i := 0; i < p.c.Concurrency; i++ {
-		p.eg.Go(p.worker)
+		p.eg.Go(func() error { return p.worker(ch) })
 	}
 
 	return &p, nil
@@ -185,7 +185,7 @@ func (p *putter) Write(b []byte) (int, error) {
 // most) `p.bufsz`, adds the data to the hash, and passes each part to
 // `p.ch` to be uploaded by the workers. It terminates when it has
 // exausted the input or experiences a read error.
-func (p *putter) queueParts(ctx context.Context, r io.Reader) error {
+func (p *putter) queueParts(ctx context.Context, r io.Reader, ch chan<- *s3client.Part) error {
 	for {
 		buf := p.sp.Get()
 		if int64(cap(buf)) != p.bufsz {
@@ -222,7 +222,7 @@ func (p *putter) queueParts(ctx context.Context, r io.Reader) error {
 		}
 
 		select {
-		case p.ch <- part:
+		case ch <- part:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -264,8 +264,8 @@ func (p *putter) addPart(buf []byte) (*s3client.Part, error) {
 // worker receives parts from `p.ch` that are ready to upload, and
 // uploads them to S3 as file parts. Then it recycles the part's
 // buffer back to the buffer pool.
-func (p *putter) worker() error {
-	for part := range p.ch {
+func (p *putter) worker(ch <-chan *s3client.Part) error {
+	for part := range ch {
 		err := p.client.UploadPart(p.uploadID, part)
 		if err != nil {
 			return err
