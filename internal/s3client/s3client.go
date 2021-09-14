@@ -63,7 +63,8 @@ func (c *Client) StartMultipartUpload(h http.Header) (string, error) {
 		return "", err
 	}
 	if closeErr != nil {
-		return r.UploadID, closeErr
+		_ = c.AbortMultipartUpload(r.UploadID)
+		return "", closeErr
 	}
 	return r.UploadID, nil
 }
