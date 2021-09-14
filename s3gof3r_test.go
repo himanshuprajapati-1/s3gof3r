@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("creating test bucket: %v", err)
 	}
 	uploadTestFiles()
+	os.Exit(m.Run())
 }
 
 func uploadTestFiles() {

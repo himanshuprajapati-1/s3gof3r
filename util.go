@@ -73,3 +73,9 @@ func (e *RespError) Error() string {
 		e.Message,
 	)
 }
+
+type bufferPoolLogger struct{}
+
+func (l bufferPoolLogger) Printf(format string, a ...interface{}) {
+	logger.debugPrintf(format, a...)
+}

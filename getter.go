@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/github/s3gof3r/internal/pool"
 )
 
 const qWaitMax = 2
@@ -39,7 +41,7 @@ type getter struct {
 	qWaitLen uint
 	cond     sync.Cond
 
-	sp *bp
+	sp *pool.BufferPool
 
 	closed bool
 	c      *Config
@@ -95,7 +97,7 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	g.chunkTotal = int((g.contentLen + g.bufsz - 1) / g.bufsz) // round up, integer division
 	logger.debugPrintf("object size: %3.2g MB", float64(g.contentLen)/float64((1*mb)))
 
-	g.sp = bufferPool(g.bufsz)
+	g.sp = pool.NewBufferPool(bufferPoolLogger{}, g.bufsz)
 
 	for i := 0; i < g.c.Concurrency; i++ {
 		go g.worker()
@@ -169,7 +171,7 @@ func (g *getter) worker() {
 
 func (g *getter) retryGetChunk(c *chunk) {
 	var err error
-	c.b = <-g.sp.get
+	c.b = g.sp.Get()
 	for i := 0; i < g.c.NTry; i++ {
 		err = g.getChunk(c)
 		if err == nil {
@@ -267,7 +269,7 @@ func (g *getter) Read(p []byte) (int, error) {
 		g.bytesRead += int64(n)
 
 		if g.cIdx >= g.rChunk.size { // chunk complete
-			g.sp.give <- g.rChunk.b
+			g.sp.Put(g.rChunk.b)
 			g.chunkID++
 			g.rChunk = nil
 		}
@@ -312,7 +314,7 @@ func (g *getter) Close() error {
 		return syscall.EINVAL
 	}
 	g.closed = true
-	close(g.sp.quit)
+	g.sp.Close()
 	close(g.quit)
 	g.cond.Broadcast()
 	if g.err != nil {
