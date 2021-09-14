@@ -133,20 +133,24 @@ func (p *putter) Write(b []byte) (int, error) {
 		nw += n
 
 		if len(p.buf) == p.bufbytes {
-			p.flush()
+			_ = p.flush()
 		}
 	}
 	return nw, nil
 }
 
-func (p *putter) flush() {
+func (p *putter) flush() error {
 	part, err := p.addPart(p.buf[:p.bufbytes])
 	if err != nil {
 		p.err = err
 	}
 	p.buf, p.bufbytes = nil, 0
 
-	p.ch <- part
+	select {
+	case p.ch <- part:
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	}
 
 	// if necessary, double buffer size every 2000 parts due to the 10000-part AWS limit
 	// to reach the 5 Terabyte max object size, initial part size must be ~85 MB
@@ -156,6 +160,8 @@ func (p *putter) flush() {
 		p.sp.SetBufferSize(p.bufsz) // update pool buffer size
 		logger.debugPrintf("part size doubled to %d", p.bufsz)
 	}
+
+	return nil
 }
 
 // newPart creates a new "multipart upload" part containing the bytes
@@ -204,7 +210,7 @@ func (p *putter) Close() error {
 	}
 	if p.bufbytes > 0 || // partial part
 		len(p.parts) == 0 { // 0 length file
-		p.flush()
+		_ = p.flush()
 	}
 	close(p.ch)
 	p.wg.Wait()
