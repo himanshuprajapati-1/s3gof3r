@@ -85,7 +85,6 @@ type s3Putter interface {
 // `ctx.Done()` and then closes the write end of the pipe if it hasn't
 // already been closed by `p.Close()`.
 type putter struct {
-	ctx    context.Context
 	cancel context.CancelFunc
 
 	url    url.URL
@@ -124,7 +123,6 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	bCopy := *b
 	bufsz := max64(minPartSize, cCopy.PartSize)
 	p := putter{
-		ctx:        ctx,
 		cancel:     cancel,
 		url:        url,
 		c:          &cCopy,
@@ -150,7 +148,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	p.pw = pw
 
 	p.eg.Go(func() error {
-		err = p.queueParts(pr)
+		err = p.queueParts(ctx, pr)
 		p.closeOnce.Do(func() { pr.Close() })
 		close(p.ch)
 		return err
@@ -187,7 +185,7 @@ func (p *putter) Write(b []byte) (int, error) {
 // most) `p.bufsz`, adds the data to the hash, and passes each part to
 // `p.ch` to be uploaded by the workers. It terminates when it has
 // exausted the input or experiences a read error.
-func (p *putter) queueParts(r io.Reader) error {
+func (p *putter) queueParts(ctx context.Context, r io.Reader) error {
 	for {
 		buf := p.sp.Get()
 		if int64(cap(buf)) != p.bufsz {
@@ -225,8 +223,8 @@ func (p *putter) queueParts(r io.Reader) error {
 
 		select {
 		case p.ch <- part:
-		case <-p.ctx.Done():
-			return p.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 
 		if lastPart {
