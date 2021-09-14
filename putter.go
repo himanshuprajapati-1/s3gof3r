@@ -2,6 +2,7 @@ package s3gof3r
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
@@ -37,6 +38,9 @@ type s3Putter interface {
 }
 
 type putter struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	url    url.URL
 	b      *Bucket
 	c      *Config
@@ -65,12 +69,16 @@ type putter struct {
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
 func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
+	ctx, cancel := context.WithCancel(context.TODO())
+
 	cCopy := *c
 	cCopy.Concurrency = max(c.Concurrency, 1)
 	cCopy.NTry = max(c.NTry, 1)
 	bCopy := *b
 	bufsz := max64(minPartSize, cCopy.PartSize)
 	p := putter{
+		ctx:        ctx,
+		cancel:     cancel,
 		url:        url,
 		c:          &cCopy,
 		b:          &bCopy,
@@ -85,6 +93,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	var err error
 	p.uploadID, err = p.client.StartMultipartUpload(h)
 	if err != nil {
+		p.cancel()
 		return nil, err
 	}
 
@@ -183,6 +192,8 @@ func (p *putter) worker() {
 }
 
 func (p *putter) Close() error {
+	defer p.cancel()
+
 	if p.closed {
 		p.abort()
 		return syscall.EINVAL
