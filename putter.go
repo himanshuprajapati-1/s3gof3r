@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/github/s3gof3r/internal/pool"
 	"github.com/github/s3gof3r/internal/s3client"
+	"golang.org/x/sync/errgroup"
 )
 
 // defined by amazon
@@ -37,6 +39,51 @@ type s3Putter interface {
 	PutMD5(url *url.URL, md5 string) error
 }
 
+// putter is an `io.Writer` that uploads the data written to it to an
+// S3 blob.
+//
+// Data flow for data written via `putter.Write()`:
+//
+//                                                                receive          putPart()
+//                                                                      +----------+     +----+
+//                                                                    > | worker() | --> | S3 |
+//            p.pw.Write()      pr.Read()             send           /  +----------+     +----+
+//     +--------+     +---------+     +--------------+     +------+ /   +----------+     +----+
+//     | caller | --> | io.Pipe | --> | queueParts() | --> | p.ch | --> | worker() | --> | S3 |
+//     +--------+     +---------+     +--------------+     +------+ \   +----------+     +----+
+//                                          |                        \  +----------+     +----+
+//                                          |                         > | worker() | --> | S3 |
+//                                     hashContent()                    +----------+     +----+
+//                                          |
+//                                          v
+//                                      +-------+                Close()                 +----+
+//                                      | p.xml | -------------------------------------> | S3 |
+//                                      +-------+                                        +----+
+//
+// The normal shutdown sequence:
+//
+// * The caller invokes `p.Close()`.
+//
+// * This closes `p.pr`, the write end of the pipe, which causes
+//   `queueParts()` to read an EOF and return.
+//
+// * The `queueParts()` goroutine closes the read end of the pipe
+//   (which makes any future calls to `p.Write()` fail) and closes
+//   `p.ch`.
+//
+// * The closure of `p.ch` causes the `worker()` invocations to
+//   return.
+//
+// * When all of the above goroutines finish, `p.eg.Wait()` returns,
+//   allowing the `CompleteMultipartUpload` step to proceed.
+//
+// If an error occurs in one of the goroutines, the goroutine returns
+// an error, which causes the `errgroup.Group` to cancel its context,
+// causing most of the other goroutines to exit promptly. The only
+// tricky one is `queueParts()`, which might be blocked reading from
+// the read end of the pipe. So an extra goroutine waits on
+// `ctx.Done()` and then closes the write end of the pipe if it hasn't
+// already been closed by `p.Close()`.
 type putter struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -46,13 +93,12 @@ type putter struct {
 	c      *Config
 	client s3Putter
 
+	pw *io.PipeWriter
+
 	bufsz      int64
-	buf        []byte
-	bufbytes   int // bytes written to current buffer
 	ch         chan *s3client.Part
-	closed     bool
-	err        error
-	wg         sync.WaitGroup
+	closeOnce  sync.Once
+	eg         *errgroup.Group
 	md5OfParts hash.Hash
 	md5        hash.Hash
 	eTag       string
@@ -70,6 +116,7 @@ type putter struct {
 // subsequent PUT requests.
 func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
 	ctx, cancel := context.WithCancel(context.TODO())
+	eg, ctx := errgroup.WithContext(ctx)
 
 	cCopy := *c
 	cCopy.Concurrency = max(c.Concurrency, 1)
@@ -84,6 +131,7 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 		b:          &bCopy,
 		bufsz:      bufsz,
 		ch:         make(chan *s3client.Part),
+		eg:         eg,
 		md5OfParts: md5.New(),
 		md5:        md5.New(),
 	}
@@ -98,70 +146,102 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	}
 
 	p.sp = pool.NewBufferPool(bufferPoolLogger{}, bufsz)
+	pr, pw := io.Pipe()
+	p.pw = pw
+
+	p.eg.Go(func() error {
+		err = p.queueParts(pr)
+		p.closeOnce.Do(func() { pr.Close() })
+		close(p.ch)
+		return err
+	})
+
+	// Close `p.pw` to unblock `queueParts()` (which might be waiting
+	// on `pr.Read()`) if the context is cancelled before `p.Close()`
+	// is called. This also prevents any more successful calls to
+	// `Write()`.
+	go func() {
+		<-ctx.Done()
+		p.closeOnce.Do(func() {
+			p.pw.CloseWithError(errors.New("upload aborted"))
+		})
+	}()
 
 	for i := 0; i < p.c.Concurrency; i++ {
-		p.wg.Add(1)
-		go func() {
-			defer p.wg.Done()
-			p.worker()
-		}()
+		p.eg.Go(p.worker)
 	}
 
 	return &p, nil
 }
 
 func (p *putter) Write(b []byte) (int, error) {
-	if p.closed {
-		p.abort()
-		return 0, syscall.EINVAL
+	n, err := p.pw.Write(b)
+	if err == io.ErrClosedPipe {
+		// For backwards compatibility:
+		err = syscall.EINVAL
 	}
-	if p.err != nil {
-		p.abort()
-		return 0, p.err
-	}
-	nw := 0
-	for nw < len(b) {
-		if p.buf == nil {
-			p.buf = p.sp.Get()
-			if int64(cap(p.buf)) < p.bufsz {
-				p.buf = make([]byte, p.bufsz)
-				runtime.GC()
-			}
-		}
-		n := copy(p.buf[p.bufbytes:], b[nw:])
-		p.bufbytes += n
-		nw += n
-
-		if len(p.buf) == p.bufbytes {
-			_ = p.flush()
-		}
-	}
-	return nw, nil
+	return n, err
 }
 
-func (p *putter) flush() error {
-	part, err := p.addPart(p.buf[:p.bufbytes])
-	if err != nil {
-		p.err = err
-	}
-	p.buf, p.bufbytes = nil, 0
+// queueParts reads from `r`, breaks the input into parts of size (at
+// most) `p.bufsz`, adds the data to the hash, and passes each part to
+// `p.ch` to be uploaded by the workers. It terminates when it has
+// exausted the input or experiences a read error.
+func (p *putter) queueParts(r io.Reader) error {
+	for {
+		buf := p.sp.Get()
+		if int64(cap(buf)) != p.bufsz {
+			buf = make([]byte, p.bufsz)
+			runtime.GC()
+		}
+		n, err := io.ReadFull(r, buf)
+		lastPart := false
+		switch err {
+		case nil:
+			// No error. Send this part then continue looping.
+		case io.EOF:
+			if len(p.parts) > 0 {
+				// There was an EOF immediately after the previous
+				// part. This new part would be empty, so we don't
+				// have to send it.
+				return nil
+			}
+			// The file was zero length. In this case, we have to
+			// upload the zero-length part, but then we're done:
+			lastPart = true
+		case io.ErrUnexpectedEOF:
+			// The input was exhausted but only partly filled this
+			// part. Send what we have, then we're done.
+			lastPart = true
+		default:
+			// There was some other kind of error:
+			return err
+		}
 
-	select {
-	case p.ch <- part:
-	case <-p.ctx.Done():
-		return p.ctx.Err()
-	}
+		part, err := p.addPart(buf[:n])
+		if err != nil {
+			return err
+		}
 
-	// if necessary, double buffer size every 2000 parts due to the 10000-part AWS limit
-	// to reach the 5 Terabyte max object size, initial part size must be ~85 MB
-	n := len(p.parts)
-	if n%2000 == 0 && n < maxNPart && growPartSize(n, p.bufsz, p.putsz) {
-		p.bufsz = min64(p.bufsz*2, maxPartSize)
-		p.sp.SetBufferSize(p.bufsz) // update pool buffer size
-		logger.debugPrintf("part size doubled to %d", p.bufsz)
-	}
+		select {
+		case p.ch <- part:
+		case <-p.ctx.Done():
+			return p.ctx.Err()
+		}
 
-	return nil
+		if lastPart {
+			return nil
+		}
+
+		// if necessary, double buffer size every 2000 parts due to the 10000-part AWS limit
+		// to reach the 5 Terabyte max object size, initial part size must be ~85 MB
+		count := len(p.parts)
+		if count%2000 == 0 && count < maxNPart && growPartSize(count, p.bufsz, p.putsz) {
+			p.bufsz = min64(p.bufsz*2, maxPartSize)
+			p.sp.SetBufferSize(p.bufsz) // update pool buffer size
+			logger.debugPrintf("part size doubled to %d", p.bufsz)
+		}
+	}
 }
 
 // newPart creates a new "multipart upload" part containing the bytes
@@ -183,11 +263,14 @@ func (p *putter) addPart(buf []byte) (*s3client.Part, error) {
 	return part, err
 }
 
-func (p *putter) worker() {
+// worker receives parts from `p.ch` that are ready to upload, and
+// uploads them to S3 as file parts. Then it recycles the part's
+// buffer back to the buffer pool.
+func (p *putter) worker() error {
 	for part := range p.ch {
 		err := p.client.UploadPart(p.uploadID, part)
 		if err != nil {
-			p.err = err
+			return err
 		}
 
 		// Give the buffer back to the pool, first making sure
@@ -195,42 +278,51 @@ func (p *putter) worker() {
 		p.sp.Put(part.Data[:cap(part.Data)])
 		part.Data = nil
 	}
+	return nil
 }
 
 func (p *putter) Close() error {
 	defer p.cancel()
+	defer p.sp.Close()
 
-	if p.closed {
-		p.abort()
-		return syscall.EINVAL
+	cleanup := func() {
+		p.cancel()
+		p.eg.Wait()
+		if p.uploadID != "" {
+			err := p.client.AbortMultipartUpload(p.uploadID)
+			if err != nil {
+				logger.Printf("Error aborting multipart upload: %v\n", err)
+			}
+		}
 	}
-	if p.err != nil {
-		p.abort()
-		return p.err
-	}
-	if p.bufbytes > 0 || // partial part
-		len(p.parts) == 0 { // 0 length file
-		_ = p.flush()
-	}
-	close(p.ch)
-	p.wg.Wait()
-	p.closed = true
-	p.sp.Close()
 
-	// check p.err before completing
-	if p.err != nil {
-		p.abort()
-		return p.err
+	// Closing `p.pw` prevents any future `Write()` calls from
+	// succeeding and tells `queueParts()` that no more data is
+	// coming:
+	var err error
+	p.closeOnce.Do(func() {
+		err = p.pw.Close()
+	})
+	if err != nil {
+		cleanup()
+		return errors.New("unexpected error closing internal pipe")
+	}
+
+	err = p.eg.Wait()
+	if err != nil {
+		cleanup()
+		return err
 	}
 
 	eTag, err := p.client.CompleteMultipartUpload(p.uploadID, p.parts)
 	if err != nil {
-		p.abort()
+		cleanup()
 		return err
 	}
 	p.eTag = eTag
 
 	if err := p.checkMd5sOfParts(); err != nil {
+		cleanup()
 		return err
 	}
 
@@ -270,14 +362,6 @@ func (p *putter) checkMd5sOfParts() error {
 	}
 
 	return nil
-}
-
-// Try to abort multipart upload. Do not error on failure.
-func (p *putter) abort() {
-	err := p.client.AbortMultipartUpload(p.uploadID)
-	if err != nil {
-		logger.Printf("Error aborting multipart upload: %v\n", err)
-	}
 }
 
 // Md5 functions
