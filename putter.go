@@ -167,23 +167,26 @@ func (p *putter) addPart(buf []byte) (*s3client.Part, error) {
 
 func (p *putter) worker() {
 	for part := range p.ch {
-		p.retryPutPart(part)
+		err := p.retryPutPart(part)
+		if err != nil {
+			p.err = err
+		}
 	}
 }
 
 // Upload `part` to S3 and handle errors.
-func (p *putter) retryPutPart(part *s3client.Part) {
+func (p *putter) retryPutPart(part *s3client.Part) error {
 	defer p.wg.Done()
 	err := p.client.UploadPart(p.uploadID, part)
 	if err != nil {
-		p.err = err
-		return
+		return err
 	}
 
 	// Give the buffer back to the pool, first making sure
 	// that its length is set to its full capacity:
 	p.sp.Put(part.Data[:cap(part.Data)])
 	part.Data = nil
+	return nil
 }
 
 func (p *putter) Close() error {
