@@ -91,7 +91,11 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 	p.sp = pool.NewBufferPool(bufferPoolLogger{}, bufsz)
 
 	for i := 0; i < p.c.Concurrency; i++ {
-		go p.worker()
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			p.worker()
+		}()
 	}
 
 	return &p, nil
@@ -127,7 +131,6 @@ func (p *putter) Write(b []byte) (int, error) {
 }
 
 func (p *putter) flush() {
-	p.wg.Add(1)
 	part, err := p.addPart(p.buf[:p.bufbytes])
 	if err != nil {
 		p.err = err
@@ -176,7 +179,6 @@ func (p *putter) worker() {
 		// that its length is set to its full capacity:
 		p.sp.Put(part.Data[:cap(part.Data)])
 		part.Data = nil
-		p.wg.Done()
 	}
 }
 
