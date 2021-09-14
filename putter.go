@@ -65,15 +65,22 @@ type putter struct {
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
 func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
-	p := new(putter)
-	p.url = url
-	p.c, p.b = new(Config), new(Bucket)
-	*p.c, *p.b = *c, *b
-	p.c.Concurrency = max(c.Concurrency, 1)
-	p.c.NTry = max(c.NTry, 1)
-	p.bufsz = max64(minPartSize, c.PartSize)
+	cCopy := *c
+	cCopy.Concurrency = max(c.Concurrency, 1)
+	cCopy.NTry = max(c.NTry, 1)
+	bCopy := *b
+	bufsz := max64(minPartSize, cCopy.PartSize)
+	p := putter{
+		url:        url,
+		c:          &cCopy,
+		b:          &bCopy,
+		bufsz:      bufsz,
+		ch:         make(chan *s3client.Part),
+		md5OfParts: md5.New(),
+		md5:        md5.New(),
+	}
 
-	p.client = s3client.New(url, p.b, p.c.Client, p.c.NTry, bufferPoolLogger{})
+	p.client = s3client.New(p.url, p.b, p.c.Client, p.c.NTry, bufferPoolLogger{})
 
 	var err error
 	p.uploadID, err = p.client.StartMultipartUpload(h)
@@ -81,16 +88,13 @@ func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error
 		return nil, err
 	}
 
-	p.ch = make(chan *s3client.Part)
+	p.sp = pool.NewBufferPool(bufferPoolLogger{}, bufsz)
+
 	for i := 0; i < p.c.Concurrency; i++ {
 		go p.worker()
 	}
-	p.md5OfParts = md5.New()
-	p.md5 = md5.New()
 
-	p.sp = pool.NewBufferPool(bufferPoolLogger{}, p.bufsz)
-
-	return p, nil
+	return &p, nil
 }
 
 func (p *putter) Write(b []byte) (int, error) {
