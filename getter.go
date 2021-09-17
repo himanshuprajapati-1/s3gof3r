@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/github/s3gof3r/internal/pool"
+	"github.com/github/s3gof3r/internal/s3client"
 )
 
 const qWaitMax = 2
@@ -82,7 +83,7 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 		return nil, nil, err
 	}
 	if resp.StatusCode != 200 {
-		return nil, nil, newRespError(resp)
+		return nil, nil, s3client.NewRespError(resp)
 	}
 	// Otherwise, we don't need the body:
 	_ = resp.Body.Close()
@@ -115,7 +116,7 @@ func (g *getter) retryRequest(method, urlStr string, body io.ReadSeeker) (resp *
 		}
 
 		if body != nil {
-			req.Header.Set(sha256Header, shaReader(body))
+			req.Header.Set(s3client.SHA256Header, s3client.SHA256Reader(body))
 		}
 
 		g.b.Sign(req)
@@ -201,7 +202,7 @@ func (g *getter) getChunk(c *chunk) error {
 		return err
 	}
 	if resp.StatusCode != 206 && resp.StatusCode != 200 {
-		return newRespError(resp)
+		return s3client.NewRespError(resp)
 	}
 
 	n, err := io.ReadAtLeast(resp.Body, c.b, int(c.size))
@@ -346,7 +347,9 @@ func (g *getter) checkMd5() error {
 		return err
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("MD5 check failed: %s not found: %s", md5Url.String(), newRespError(resp))
+		return fmt.Errorf(
+			"MD5 check failed: %s not found: %s", md5Url.String(), s3client.NewRespError(resp),
+		)
 	}
 
 	givenMd5, err := ioutil.ReadAll(resp.Body)

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/github/s3gof3r/internal/s3client"
 )
 
 // Keys for an Amazon Web Services account.
@@ -40,7 +42,7 @@ func InstanceKeys() (Keys, error) {
 		return Keys{}, err
 	}
 	if resp.StatusCode != 200 {
-		return Keys{}, newRespError(resp)
+		return Keys{}, s3client.NewRespError(resp)
 	}
 
 	role, err := ioutil.ReadAll(resp.Body)
@@ -58,7 +60,7 @@ func InstanceKeys() (Keys, error) {
 		return Keys{}, err
 	}
 	if resp.StatusCode != 200 {
-		return Keys{}, newRespError(resp)
+		return Keys{}, s3client.NewRespError(resp)
 	}
 
 	metadata, err := ioutil.ReadAll(resp.Body)
