@@ -87,7 +87,6 @@ type s3Putter interface {
 type putter struct {
 	cancel context.CancelFunc
 
-	url    *url.URL
 	c      *Config
 	client s3Putter
 
@@ -118,7 +117,6 @@ func newPutter(blobURL *url.URL, h http.Header, c *Config, b *Bucket) (*putter, 
 	c = c.safeCopy(minPartSize)
 	p := putter{
 		cancel:     cancel,
-		url:        blobURL,
 		c:          c,
 		bufsz:      c.PartSize,
 		eg:         eg,
@@ -128,7 +126,7 @@ func newPutter(blobURL *url.URL, h http.Header, c *Config, b *Bucket) (*putter, 
 
 	var md5URL *url.URL
 	if p.c.Md5Check {
-		md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
+		md5Path := fmt.Sprint(".md5", blobURL.Path, ".md5")
 		var err error
 		md5URL, err = b.url(md5Path, p.c)
 		if err != nil {
@@ -136,7 +134,7 @@ func newPutter(blobURL *url.URL, h http.Header, c *Config, b *Bucket) (*putter, 
 		}
 	}
 
-	p.client = s3client.New(p.url, md5URL, b, p.c.Client, p.c.NTry, bufferPoolLogger{})
+	p.client = s3client.New(blobURL, md5URL, b, p.c.Client, p.c.NTry, bufferPoolLogger{})
 
 	var err error
 	p.uploadID, err = p.client.StartMultipartUpload(h)
