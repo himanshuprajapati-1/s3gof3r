@@ -113,7 +113,7 @@ type putter struct {
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
 func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(context.Background())
 	eg, ctx := errgroup.WithContext(ctx)
 
 	cCopy := *c
