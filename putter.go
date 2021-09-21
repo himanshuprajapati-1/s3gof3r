@@ -144,9 +144,24 @@ func newPutter(client s3Putter, h http.Header, c *Config) (*putter, error) {
 		return err
 	})
 
-	// Close `p.pw` to unblock `queueParts()` (which might be waiting
-	// on `pr.Read()`) if the context is cancelled before `p.Close()`
-	// is called. This also prevents any more successful calls to
+	for i := 0; i < p.c.Concurrency; i++ {
+		p.eg.Go(
+			func() error {
+				err := p.worker(ch)
+				if err != nil {
+					// If a worker finishes with an error, close `pr`
+					// with the same error, so that writers are
+					// unblocked and also return that error.
+					p.closeOnce.Do(func() { pr.CloseWithError(err) })
+				}
+				return err
+			},
+		)
+	}
+
+	// If the context is cancelled before `p.Close()` is called, close
+	// `p.pw` to unblock `queueParts()` (which might be waiting on
+	// `pr.Read()`). This also prevents any more successful calls to
 	// `Write()`.
 	go func() {
 		<-ctx.Done()
@@ -154,10 +169,6 @@ func newPutter(client s3Putter, h http.Header, c *Config) (*putter, error) {
 			p.pw.CloseWithError(errors.New("upload aborted"))
 		})
 	}()
-
-	for i := 0; i < p.c.Concurrency; i++ {
-		p.eg.Go(func() error { return p.worker(ch) })
-	}
 
 	return &p, nil
 }
