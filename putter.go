@@ -36,7 +36,7 @@ type s3Putter interface {
 	UploadPart(uploadID string, part *s3client.Part) error
 	CompleteMultipartUpload(uploadID string, parts []*s3client.Part) (string, error)
 	AbortMultipartUpload(uploadID string) error
-	PutMD5(url *url.URL, md5 string) error
+	PutMD5(md5 string) error
 }
 
 // putter is an `io.Writer` that uploads the data written to it to an
@@ -88,7 +88,6 @@ type putter struct {
 	cancel context.CancelFunc
 
 	url    *url.URL
-	b      *Bucket
 	c      *Config
 	client s3Putter
 
@@ -112,24 +111,32 @@ type putter struct {
 // See http://docs.amazonwebservices.com/AmazonS3/latest/dev/mpuoverview.html.
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
-func newPutter(url *url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
+func newPutter(blobURL *url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	eg, ctx := errgroup.WithContext(ctx)
 
 	c = c.safeCopy(minPartSize)
-	bCopy := *b
 	p := putter{
 		cancel:     cancel,
-		url:        url,
+		url:        blobURL,
 		c:          c,
-		b:          &bCopy,
 		bufsz:      c.PartSize,
 		eg:         eg,
 		md5OfParts: md5.New(),
 		md5:        md5.New(),
 	}
 
-	p.client = s3client.New(p.url, p.b, p.c.Client, p.c.NTry, bufferPoolLogger{})
+	var md5URL *url.URL
+	if p.c.Md5Check {
+		md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
+		var err error
+		md5URL, err = b.url(md5Path, p.c)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	p.client = s3client.New(p.url, md5URL, b, p.c.Client, p.c.NTry, bufferPoolLogger{})
 
 	var err error
 	p.uploadID, err = p.client.StartMultipartUpload(h)
@@ -322,16 +329,9 @@ func (p *putter) Close() error {
 	}
 
 	if p.c.Md5Check {
-		md5Path := fmt.Sprint(".md5", p.url.Path, ".md5")
-		md5URL, err := p.b.url(md5Path, p.c)
-		if err != nil {
-			return err
-		}
 		sum := fmt.Sprintf("%x", p.md5.Sum(nil))
-		logger.debugPrintln("md5: ", sum)
-		logger.debugPrintln("md5Path: ", md5Path)
 		// FIXME: should this error really be ignored?
-		_ = p.client.PutMD5(md5URL, sum)
+		_ = p.client.PutMD5(sum)
 	}
 	return nil
 }
