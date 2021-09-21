@@ -116,17 +116,14 @@ func newPutter(url *url.URL, h http.Header, c *Config, b *Bucket) (*putter, erro
 	ctx, cancel := context.WithCancel(context.Background())
 	eg, ctx := errgroup.WithContext(ctx)
 
-	cCopy := *c
-	cCopy.Concurrency = max(c.Concurrency, 1)
-	cCopy.NTry = max(c.NTry, 1)
+	c = c.safeCopy(minPartSize)
 	bCopy := *b
-	bufsz := max64(minPartSize, cCopy.PartSize)
 	p := putter{
 		cancel:     cancel,
 		url:        url,
-		c:          &cCopy,
+		c:          c,
 		b:          &bCopy,
-		bufsz:      bufsz,
+		bufsz:      c.PartSize,
 		eg:         eg,
 		md5OfParts: md5.New(),
 		md5:        md5.New(),
@@ -141,7 +138,7 @@ func newPutter(url *url.URL, h http.Header, c *Config, b *Bucket) (*putter, erro
 		return nil, err
 	}
 
-	p.sp = pool.NewBufferPool(bufferPoolLogger{}, bufsz)
+	p.sp = pool.NewBufferPool(bufferPoolLogger{}, p.bufsz)
 	pr, pw := io.Pipe()
 	p.pw = pw
 

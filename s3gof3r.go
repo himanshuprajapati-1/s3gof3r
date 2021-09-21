@@ -81,6 +81,16 @@ var DefaultConfig = &Config{
 	Client:      ClientWithTimeout(clientTimeout),
 }
 
+// safeCopy returns a pointer to a fresh copy of `c`, with some
+// parameters adjusted to be within allowable limits.
+func (c *Config) safeCopy(minPartSize int64) *Config {
+	cCopy := *c
+	cCopy.Concurrency = max(c.Concurrency, 1)
+	cCopy.NTry = max(c.NTry, 1)
+	cCopy.PartSize = max64(minPartSize, cCopy.PartSize)
+	return &cCopy
+}
+
 // http client timeout
 const clientTimeout = 5 * time.Second
 
