@@ -12,7 +12,6 @@ import (
 	"hash"
 	"io"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -110,7 +109,7 @@ type putter struct {
 // See http://docs.amazonwebservices.com/AmazonS3/latest/dev/mpuoverview.html.
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
-func newPutter(blobURL *url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
+func newPutter(client s3Putter, h http.Header, c *Config) (*putter, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -118,23 +117,12 @@ func newPutter(blobURL *url.URL, h http.Header, c *Config, b *Bucket) (*putter, 
 	p := putter{
 		cancel:     cancel,
 		c:          c,
+		client:     client,
 		bufsz:      c.PartSize,
 		eg:         eg,
 		md5OfParts: md5.New(),
 		md5:        md5.New(),
 	}
-
-	var md5URL *url.URL
-	if p.c.Md5Check {
-		md5Path := fmt.Sprint(".md5", blobURL.Path, ".md5")
-		var err error
-		md5URL, err = b.url(md5Path, p.c)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	p.client = s3client.New(blobURL, md5URL, b, p.c.Client, p.c.NTry, bufferPoolLogger{})
 
 	var err error
 	p.uploadID, err = p.client.StartMultipartUpload(h)

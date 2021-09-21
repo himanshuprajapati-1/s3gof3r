@@ -149,12 +149,24 @@ func (b *Bucket) PutWriter(path string, h http.Header, c *Config) (w io.WriteClo
 	if c == nil {
 		c = b.conf()
 	}
-	u, err := b.url(path, c)
+	blobURL, err := b.url(path, c)
 	if err != nil {
 		return nil, err
 	}
 
-	return newPutter(u, h, c, b)
+	var md5URL *url.URL
+	if c.Md5Check {
+		md5Path := fmt.Sprint(".md5", blobURL.Path, ".md5")
+		var err error
+		md5URL, err = b.url(md5Path, c)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	client := s3client.New(blobURL, md5URL, b, c.Client, c.NTry, bufferPoolLogger{})
+
+	return newPutter(client, h, c)
 }
 
 // url returns a parsed url to the given path. c must not be nil
