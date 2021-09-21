@@ -24,7 +24,7 @@ const (
 // Client is a Client that encapsules low-level interactions with a
 // specific, single blob.
 type Client struct {
-	url        url.URL
+	url        *url.URL
 	signer     signer
 	httpClient *http.Client // http client to use for requests
 	nTry       int
@@ -32,7 +32,7 @@ type Client struct {
 }
 
 func New(
-	url url.URL, signer signer, httpClient *http.Client, nTry int, logger logger,
+	url *url.URL, signer signer, httpClient *http.Client, nTry int, logger logger,
 ) *Client {
 	c := Client{
 		url:        url,

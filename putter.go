@@ -87,7 +87,7 @@ type s3Putter interface {
 type putter struct {
 	cancel context.CancelFunc
 
-	url    url.URL
+	url    *url.URL
 	b      *Bucket
 	c      *Config
 	client s3Putter
@@ -112,7 +112,7 @@ type putter struct {
 // See http://docs.amazonwebservices.com/AmazonS3/latest/dev/mpuoverview.html.
 // The initial request returns an UploadId that we use to identify
 // subsequent PUT requests.
-func newPutter(url url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
+func newPutter(url *url.URL, h http.Header, c *Config, b *Bucket) (*putter, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	eg, ctx := errgroup.WithContext(ctx)
 

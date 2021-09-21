@@ -20,7 +20,7 @@ import (
 const qWaitMax = 2
 
 type getter struct {
-	url   url.URL
+	url   *url.URL
 	b     *Bucket
 	bufsz int64
 	err   error
@@ -59,7 +59,7 @@ type chunk struct {
 	b      []byte
 }
 
-func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header, error) {
+func newGetter(getURL *url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header, error) {
 	g := new(getter)
 	g.url = getURL
 	g.c, g.b = new(Config), new(Bucket)

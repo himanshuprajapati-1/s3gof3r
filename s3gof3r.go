@@ -126,7 +126,7 @@ func (b *Bucket) GetReader(path string, c *Config) (r io.ReadCloser, h http.Head
 	if err != nil {
 		return nil, nil, err
 	}
-	return newGetter(*u, c, b)
+	return newGetter(u, c, b)
 }
 
 // PutWriter provides a writer to upload data as multipart upload requests.
@@ -144,7 +144,7 @@ func (b *Bucket) PutWriter(path string, h http.Header, c *Config) (w io.WriteClo
 		return nil, err
 	}
 
-	return newPutter(*u, h, c, b)
+	return newPutter(u, h, c, b)
 }
 
 // url returns a parsed url to the given path. c must not be nil
