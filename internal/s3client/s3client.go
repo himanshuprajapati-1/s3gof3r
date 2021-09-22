@@ -24,7 +24,8 @@ const (
 // Client is a Client that encapsules low-level interactions with a
 // specific, single blob.
 type Client struct {
-	url        url.URL
+	url        *url.URL
+	md5URL     *url.URL
 	signer     signer
 	httpClient *http.Client // http client to use for requests
 	nTry       int
@@ -32,10 +33,11 @@ type Client struct {
 }
 
 func New(
-	url url.URL, signer signer, httpClient *http.Client, nTry int, logger logger,
+	url, md5URL *url.URL, signer signer, httpClient *http.Client, nTry int, logger logger,
 ) *Client {
 	c := Client{
 		url:        url,
+		md5URL:     md5URL,
 		signer:     signer,
 		httpClient: httpClient,
 		nTry:       nTry,
@@ -262,10 +264,12 @@ func (c *Client) AbortMultipartUpload(uploadID string) error {
 // the directory where the blob is stored, with retries. For example,
 // the md5 for blob https://mybucket.s3.amazonaws.com/gof3r will be
 // stored in https://mybucket.s3.amazonaws.com/.md5/gof3r.md5.
-func (c *Client) PutMD5(url *url.URL, md5 string) error {
+func (c *Client) PutMD5(sum string) error {
+	c.logger.Printf("md5: %s", sum)
+	c.logger.Printf("md5Path: %s", c.md5URL.Path)
 	var err error
 	for i := 0; i < c.nTry; i++ {
-		err = c.putMD5(url, md5)
+		err = c.putMD5(sum)
 		if err == nil {
 			break
 		}
@@ -277,10 +281,10 @@ func (c *Client) PutMD5(url *url.URL, md5 string) error {
 // subdirectory of the directory where the blob is stored; e.g., the
 // md5 for blob https://mybucket.s3.amazonaws.com/gof3r will be stored
 // in https://mybucket.s3.amazonaws.com/.md5/gof3r.md5.
-func (c *Client) putMD5(url *url.URL, md5 string) error {
+func (c *Client) putMD5(md5 string) error {
 	md5Reader := strings.NewReader(md5)
 
-	r, err := http.NewRequest("PUT", url.String(), md5Reader)
+	r, err := http.NewRequest("PUT", c.md5URL.String(), md5Reader)
 	if err != nil {
 		return err
 	}

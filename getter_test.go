@@ -19,7 +19,7 @@ func NewFakeGetter(testurl string) (io.ReadCloser, error) {
 	}
 	c := b.conf()
 	c.NTry = 1
-	g, _, err := newGetter(*u, c, b)
+	g, _, err := newGetter(u, c, b)
 	if err != nil {
 		return nil, fmt.Errorf("newGetter() %s", err)
 	}

@@ -20,7 +20,7 @@ import (
 const qWaitMax = 2
 
 type getter struct {
-	url   url.URL
+	url   *url.URL
 	b     *Bucket
 	bufsz int64
 	err   error
@@ -59,14 +59,13 @@ type chunk struct {
 	b      []byte
 }
 
-func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header, error) {
+func newGetter(getURL *url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header, error) {
 	g := new(getter)
 	g.url = getURL
-	g.c, g.b = new(Config), new(Bucket)
-	*g.c, *g.b = *c, *b
-	g.bufsz = max64(c.PartSize, 1)
-	g.c.NTry = max(c.NTry, 1)
-	g.c.Concurrency = max(c.Concurrency, 1)
+	g.b = new(Bucket)
+	*g.b = *b
+	g.c = c.safeCopy(1)
+	g.bufsz = g.c.PartSize
 
 	g.getCh = make(chan *chunk)
 	g.readCh = make(chan *chunk)

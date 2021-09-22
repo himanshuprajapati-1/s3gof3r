@@ -2,6 +2,7 @@ package s3gof3r
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"errors"
 	"flag"
@@ -533,24 +534,227 @@ func TestGetCloseBeforeRead(t *testing.T) {
 	}
 }
 
-func TestPutterAfterError(t *testing.T) {
-	w, err := b.PutWriter("test", nil, nil)
+// fakePutter implements `s3Putter` but its `UploadPart()` method
+// always fails.
+type fakePutter struct {
+	ctx        context.Context
+	uploadCh   chan error
+	completeCh chan error
+}
+
+func (p *fakePutter) StartMultipartUpload(_ http.Header) (string, error) {
+	return "fakeUploadID", nil
+}
+
+func (p *fakePutter) UploadPart(_ string, _ *s3client.Part) error {
+	select {
+	case err, ok := <-p.uploadCh:
+		if !ok {
+			return errors.New("upload called too many times")
+		}
+		return err
+	case <-p.ctx.Done():
+		return errors.New("upload context expired")
+	}
+}
+
+func (p *fakePutter) CompleteMultipartUpload(_ string, _ []*s3client.Part) (string, error) {
+	select {
+	case err, ok := <-p.completeCh:
+		if !ok {
+			return "", errors.New("complete called too many times")
+		}
+		return "fakeETag", err
+	case <-p.ctx.Done():
+		return "", errors.New("complete context expired")
+	}
+}
+
+func (p *fakePutter) AbortMultipartUpload(_ string) error {
+	return errors.New("AbortMultipartUpload not implemented")
+}
+
+func (p *fakePutter) PutMD5(_ string) error {
+	return errors.New("PutMD5 not implemented")
+}
+
+func TestPutterUploadError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	uploadErr := errors.New("upload error")
+	client := fakePutter{
+		ctx:        ctx,
+		uploadCh:   make(chan error, 1),
+		completeCh: make(chan error, 1),
+	}
+	p, err := newPutter(&client, nil, b.conf())
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("error instantiating putter: %v", err)
 	}
-	p, ok := w.(*putter)
-	if !ok {
-		t.Fatal("putter type cast failed")
+
+	client.uploadCh <- uploadErr
+	close(client.uploadCh)
+
+	_, err = p.Write([]byte("foo"))
+	// We don't insist that this return an error, but if it does it
+	// has to be `uploadErr`.
+	if err != nil && err != uploadErr {
+		t.Errorf("unexpected error on Write: %v", err)
 	}
-	terr := fmt.Errorf("test error")
-	p.err = terr
-	_, err = w.Write([]byte("foo"))
-	if err != terr {
-		t.Errorf("expected error %v on Write, got %v", terr, err)
+
+	client.completeCh <- nil
+	err = p.Close()
+	if err != uploadErr {
+		t.Errorf("expected error %v on Close, got %v", uploadErr, err)
 	}
-	err = w.Close()
-	if err != terr {
-		t.Errorf("expected error %v on Close, got %v", terr, err)
+}
+
+func TestBulkPutterUploadError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	uploadErr := errors.New("upload error")
+	client := fakePutter{
+		ctx:      ctx,
+		uploadCh: make(chan error, 1),
+	}
+	p, err := newPutter(&client, nil, b.conf())
+	if err != nil {
+		t.Errorf("error instantiating putter: %v", err)
+	}
+
+	client.uploadCh <- uploadErr
+
+	data := []byte("longish string to fill the buffer sooner")
+	for {
+		// After the asynchronous attempt to write the first part is
+		// seen to have failed, but before the second attempt is
+		// allowed to complete, this must return an error:
+		_, err = p.Write(data)
+		if err != nil {
+			if err != uploadErr {
+				t.Errorf("unexpected error on Write: %v", err)
+			}
+			break
+		}
+	}
+
+	// After the first error has occurred, we should continue to get
+	// the same error:
+	_, err = p.Write(data)
+	switch err {
+	case uploadErr:
+		// OK.
+	case nil:
+		t.Errorf("missing error on Write")
+	default:
+		t.Errorf("unexpected error on Write: %v", err)
+	}
+
+	// We should get the same error again from `Close()`, and
+	// `CompleteMultipartUpload()` should never be called (which it
+	// can't be, because `client.completeCh` can't be received from):
+	err = p.Close()
+	if err != uploadErr {
+		t.Errorf("expected error %v on Close, got %v", uploadErr, err)
+	}
+}
+
+func TestBulkPutterSecondUploadError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	uploadErr := errors.New("upload error")
+	client := fakePutter{
+		ctx:      ctx,
+		uploadCh: make(chan error, 1),
+	}
+	p, err := newPutter(&client, nil, b.conf())
+	if err != nil {
+		t.Errorf("error instantiating putter: %v", err)
+	}
+
+	go func() {
+		// Let the first upload succeed:
+		client.uploadCh <- nil
+		// and all subsequent ones fail:
+		for {
+			select {
+			case client.uploadCh <- uploadErr:
+			case <-ctx.Done():
+				break
+			}
+		}
+	}()
+
+	data := []byte("longish string to fill the buffer sooner")
+	for {
+		_, err = p.Write(data)
+		if err != nil {
+			if err != uploadErr {
+				t.Errorf("unexpected error on Write: %v", err)
+			}
+			break
+		}
+	}
+
+	// After the first error has occurred, we should continue to get
+	// the same error:
+	_, err = p.Write(data)
+	switch err {
+	case uploadErr:
+		// OK.
+	case nil:
+		t.Errorf("missing error on Write")
+	default:
+		t.Errorf("unexpected error on Write: %v", err)
+	}
+
+	// We should get the same error again from `Close()`, and
+	// `CompleteMultipartUpload()` should never be called (which it
+	// can't be, because `client.completeCh` can't be received from):
+	err = p.Close()
+	if err != uploadErr {
+		t.Errorf("expected error %v on Close, got %v", uploadErr, err)
+	}
+}
+
+func TestPutterCompleteError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	completeErr := errors.New("complete error")
+	client := fakePutter{
+		ctx:        ctx,
+		uploadCh:   make(chan error),
+		completeCh: make(chan error, 1),
+	}
+	p, err := newPutter(&client, nil, b.conf())
+	if err != nil {
+		t.Errorf("error instantiating putter: %v", err)
+	}
+
+	go func() {
+		// Let all uploads succeed:
+		for {
+			select {
+			case client.uploadCh <- nil:
+			case <-ctx.Done():
+				break
+			}
+		}
+	}()
+
+	_, err = p.Write([]byte("foo"))
+	if err != nil {
+		t.Errorf("unexpected error on Write: %v", err)
+	}
+
+	client.completeCh <- completeErr
+	err = p.Close()
+	if err != completeErr {
+		t.Errorf("expected error %v on Close, got %v", completeErr, err)
 	}
 }
 

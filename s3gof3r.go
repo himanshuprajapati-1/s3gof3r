@@ -81,6 +81,16 @@ var DefaultConfig = &Config{
 	Client:      ClientWithTimeout(clientTimeout),
 }
 
+// safeCopy returns a pointer to a fresh copy of `c`, with some
+// parameters adjusted to be within allowable limits.
+func (c *Config) safeCopy(minPartSize int64) *Config {
+	cCopy := *c
+	cCopy.Concurrency = max(c.Concurrency, 1)
+	cCopy.NTry = max(c.NTry, 1)
+	cCopy.PartSize = max64(minPartSize, cCopy.PartSize)
+	return &cCopy
+}
+
 // http client timeout
 const clientTimeout = 5 * time.Second
 
@@ -126,7 +136,7 @@ func (b *Bucket) GetReader(path string, c *Config) (r io.ReadCloser, h http.Head
 	if err != nil {
 		return nil, nil, err
 	}
-	return newGetter(*u, c, b)
+	return newGetter(u, c, b)
 }
 
 // PutWriter provides a writer to upload data as multipart upload requests.
@@ -139,12 +149,24 @@ func (b *Bucket) PutWriter(path string, h http.Header, c *Config) (w io.WriteClo
 	if c == nil {
 		c = b.conf()
 	}
-	u, err := b.url(path, c)
+	blobURL, err := b.url(path, c)
 	if err != nil {
 		return nil, err
 	}
 
-	return newPutter(*u, h, c, b)
+	var md5URL *url.URL
+	if c.Md5Check {
+		md5Path := fmt.Sprint(".md5", blobURL.Path, ".md5")
+		var err error
+		md5URL, err = b.url(md5Path, c)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	client := s3client.New(blobURL, md5URL, b, c.Client, c.NTry, bufferPoolLogger{})
+
+	return newPutter(client, h, c)
 }
 
 // url returns a parsed url to the given path. c must not be nil
