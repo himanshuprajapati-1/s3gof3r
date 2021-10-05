@@ -1,5 +1,7 @@
 package s3gof3r
 
+import "github.com/github/s3gof3r/internal/s3client"
+
 // convenience multipliers
 const (
 	_        = iota
@@ -44,4 +46,12 @@ type bufferPoolLogger struct{}
 
 func (l bufferPoolLogger) Printf(format string, a ...interface{}) {
 	logger.debugPrintf(format, a...)
+}
+
+func StatusFromError(err error) (int, error) {
+	if e, ok := err.(*s3client.RespError); ok {
+		return e.StatusCode, nil
+	} else {
+		return 0, e
+	}
 }
