@@ -120,7 +120,7 @@ func (g *getter) retryRequest(method, urlStr string, body io.ReadSeeker) (resp *
 
 		g.b.Sign(req)
 		resp, err = g.c.Client.Do(req)
-		if err == nil && resp.StatusCode == 500 {
+		if err == nil && resp.StatusCode >= 500 && resp.StatusCode <= 599 {
 			time.Sleep(time.Duration(math.Exp2(float64(i))) * 100 * time.Millisecond) // exponential back-off
 			continue
 		}

@@ -326,7 +326,7 @@ func (c *Client) retryRequest(
 
 		c.signer.Sign(req)
 		resp, err := c.httpClient.Do(req)
-		if err == nil && resp.StatusCode == 500 {
+		if err == nil && resp.StatusCode >= 500 && resp.StatusCode <= 599 {
 			_ = resp.Body.Close()
 			err = err500
 			// Exponential back-off:
